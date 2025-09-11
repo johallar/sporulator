@@ -4,6 +4,33 @@ from scipy.spatial.distance import pdist, squareform
 from skimage import measure, morphology
 from skimage.segmentation import clear_border
 import math
+from abc import ABC, abstractmethod
+from typing import List, Dict, Optional, Union, Tuple, Any
+
+class Detector(ABC):
+    """
+    Abstract base class for spore detection backends.
+    
+    Detection backends are responsible for finding potential spore candidates in an image.
+    They should return a list of dictionaries containing contours and confidence scores.
+    """
+    
+    @abstractmethod
+    def detect(self, image: np.ndarray) -> List[Dict[str, Any]]:
+        """
+        Detect potential spore candidates in an image.
+        
+        Args:
+            image: Input image as numpy array
+            
+        Returns:
+            List of detection candidates, each containing:
+            - 'contour': OpenCV contour (numpy array)
+            - 'confidence': Detection confidence score (0.0 to 1.0)
+            - Additional detector-specific metadata (optional)
+        """
+        pass
+
 
 class SporeAnalyzer:
     def __init__(self):
@@ -244,8 +271,68 @@ class SporeAnalyzer:
             'perimeter': cv2.arcLength(contour, True)
         }
     
-    def analyze_image(self, image):
-        """Analyze image for spores and return measurements"""
+    def analyze_candidates(self, image: np.ndarray, candidates: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+        """
+        Analyze spore candidates and return measurements.
+        
+        This method takes detection candidates from any detector backend and applies
+        the measurement and filtering logic to return spore analysis results.
+        
+        Args:
+            image: Input image as numpy array
+            candidates: List of detection candidates from a Detector, each containing:
+                       - 'contour': OpenCV contour (numpy array)
+                       - 'confidence': Detection confidence score (optional)
+                       - Additional metadata (optional)
+        
+        Returns:
+            List of spore measurement dictionaries, or None if no valid spores found.
+            Each result contains measurements, dimensions, shape metrics, etc.
+        """
+        if not candidates:
+            return None
+        
+        # Analyze each candidate using existing measurement logic
+        spore_results = []
+        for candidate in candidates:
+            # Extract contour from candidate
+            contour = candidate.get('contour')
+            if contour is None:
+                continue
+                
+            # Apply existing measurement and filtering logic
+            spore_data = self.analyze_spore(contour, image.shape)
+            if spore_data is not None:
+                # Add confidence score if provided
+                if 'confidence' in candidate:
+                    spore_data['detection_confidence'] = candidate['confidence']
+                spore_results.append(spore_data)
+        
+        return spore_results if spore_results else None
+
+    def analyze_image(self, image: np.ndarray, detector: Optional['Detector'] = None) -> Optional[List[Dict[str, Any]]]:
+        """
+        Analyze image for spores and return measurements.
+        
+        Args:
+            image: Input image as numpy array  
+            detector: Optional Detector instance. If None, uses traditional detection.
+        
+        Returns:
+            List of spore measurement dictionaries, or None if no spores found.
+        """
+        if detector is not None:
+            # Use pluggable detector
+            candidates = detector.detect(image)
+            return self.analyze_candidates(image, candidates)
+        else:
+            # Use traditional detection pipeline (backward compatibility)
+            return self._analyze_image_traditional(image)
+    
+    def _analyze_image_traditional(self, image: np.ndarray) -> Optional[List[Dict[str, Any]]]:
+        """
+        Original analyze_image implementation for backward compatibility.
+        """
         # Preprocess image
         gray, binary = self.preprocess_image(image)
         
@@ -297,3 +384,51 @@ class SporeAnalyzer:
             'width_line': ((width_x1, width_y1), (width_x2, width_y2)),
             'centroid': centroid
         }
+
+
+class TraditionalDetector(Detector):
+    """
+    Traditional OpenCV-based contour detection backend.
+    
+    This detector wraps the existing contour detection pipeline (preprocessing + contour finding)
+    to conform to the Detector interface, allowing it to be used as a pluggable backend.
+    """
+    
+    def __init__(self, analyzer: SporeAnalyzer):
+        """
+        Initialize TraditionalDetector with a SporeAnalyzer instance.
+        
+        Args:
+            analyzer: SporeAnalyzer instance to use for preprocessing parameters
+        """
+        self.analyzer = analyzer
+    
+    def detect(self, image: np.ndarray) -> List[Dict[str, Any]]:
+        """
+        Detect spore candidates using traditional OpenCV contour detection.
+        
+        Args:
+            image: Input image as numpy array
+            
+        Returns:
+            List of detection candidates, each containing:
+            - 'contour': OpenCV contour (numpy array) 
+            - 'confidence': Always 1.0 for traditional detection
+        """
+        # Use the analyzer's preprocessing pipeline
+        gray, binary = self.analyzer.preprocess_image(image)
+        
+        # Find contours using existing method
+        contours = self.analyzer.find_contours(binary)
+        
+        # Convert contours to candidate format
+        candidates = []
+        for contour in contours:
+            # Traditional detection has no confidence scoring, so set to 1.0
+            candidate = {
+                'contour': contour,
+                'confidence': 1.0
+            }
+            candidates.append(candidate)
+        
+        return candidates
