@@ -297,7 +297,7 @@ def main():
             image = Image.open(uploaded_file)
             image_array = np.array(image)
             
-            st.image(image, caption="Original Image", use_column_width=True)
+            st.image(image, caption="Original Image", use_container_width=True)
             
             # Store image in session state
             st.session_state.original_image = image_array
@@ -346,7 +346,7 @@ def main():
                                 # Show visualization
                                 if calibration_result['visualization'] is not None:
                                     st.image(calibration_result['visualization'], 
-                                            caption="Auto-Detected Calibration Objects", use_column_width=True)
+                                            caption="Auto-Detected Calibration Objects", use_container_width=True)
                             else:
                                 st.error("❌ Could not auto-detect calibration. Using manual pixel scale.")
             
@@ -394,7 +394,7 @@ def main():
                 pixel_scale
             )
             
-            st.image(overlay_image, caption="Detected Spores with Measurements", use_column_width=True)
+            st.image(overlay_image, caption="Detected Spores with Measurements", use_container_width=True)
             
             # Spore selection interface
             st.subheader("✅ Spore Selection")
@@ -490,7 +490,7 @@ def main():
                 labels={'Length_um': 'Length (μm)', 'count': 'Frequency'},
                 nbins=20
             )
-            st.plotly_chart(fig_length, use_container_width=True)
+            st.plotly_chart(fig_length, width='stretch')
             
             # Area distribution
             fig_area = px.histogram(
@@ -500,7 +500,7 @@ def main():
                 labels={'Area_um2': 'Area (μm²)', 'count': 'Frequency'},
                 nbins=20
             )
-            st.plotly_chart(fig_area, use_container_width=True)
+            st.plotly_chart(fig_area, width='stretch')
         
         with col2:
             # Width distribution
@@ -511,7 +511,7 @@ def main():
                 labels={'Width_um': 'Width (μm)', 'count': 'Frequency'},
                 nbins=20
             )
-            st.plotly_chart(fig_width, use_container_width=True)
+            st.plotly_chart(fig_width, width='stretch')
             
             # Aspect ratio distribution
             fig_aspect = px.histogram(
@@ -521,7 +521,7 @@ def main():
                 labels={'Aspect_Ratio': 'Length/Width Ratio', 'count': 'Frequency'},
                 nbins=20
             )
-            st.plotly_chart(fig_aspect, use_container_width=True)
+            st.plotly_chart(fig_aspect, width='stretch')
         
         # Shape metrics distributions
         st.subheader("🔸 Enhanced Shape Metrics")
@@ -536,7 +536,7 @@ def main():
                 labels={'Solidity': 'Solidity (Area/Convex Hull Area)', 'count': 'Frequency'},
                 nbins=20
             )
-            st.plotly_chart(fig_solidity, use_container_width=True)
+            st.plotly_chart(fig_solidity, width='stretch')
         
         with col2:
             # Convexity distribution
@@ -547,7 +547,7 @@ def main():
                 labels={'Convexity': 'Convexity (Hull Perimeter/Perimeter)', 'count': 'Frequency'},
                 nbins=20
             )
-            st.plotly_chart(fig_convexity, use_container_width=True)
+            st.plotly_chart(fig_convexity, width='stretch')
         
         with col3:
             # Extent distribution
@@ -558,7 +558,7 @@ def main():
                 labels={'Extent': 'Extent (Area/Bounding Rect Area)', 'count': 'Frequency'},
                 nbins=20
             )
-            st.plotly_chart(fig_extent, use_container_width=True)
+            st.plotly_chart(fig_extent, width='stretch')
         
         # Scatter plot: Length vs Width
         fig_scatter = px.scatter(
@@ -569,7 +569,7 @@ def main():
             labels={'Width_um': 'Width (μm)', 'Length_um': 'Length (μm)'},
             hover_data=['Spore_ID', 'Area_um2', 'Aspect_Ratio', 'Solidity', 'Convexity', 'Extent']
         )
-        st.plotly_chart(fig_scatter, use_container_width=True)
+        st.plotly_chart(fig_scatter, width='stretch')
         
         # Data table
         st.subheader("📋 Detailed Measurements")
