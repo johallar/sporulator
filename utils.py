@@ -15,6 +15,9 @@ def calculate_statistics(spore_results):
     areas = [spore['area_um2'] for spore in spore_results]
     aspect_ratios = [spore['aspect_ratio'] for spore in spore_results]
     circularities = [spore['circularity'] for spore in spore_results]
+    solidities = [spore['solidity'] for spore in spore_results]
+    convexities = [spore['convexity'] for spore in spore_results]
+    extents = [spore['extent'] for spore in spore_results]
     
     # Calculate statistics
     stats = {
@@ -41,7 +44,19 @@ def calculate_statistics(spore_results):
         'circularity_mean': np.mean(circularities),
         'circularity_std': np.std(circularities),
         'circularity_min': np.min(circularities),
-        'circularity_max': np.max(circularities)
+        'circularity_max': np.max(circularities),
+        'solidity_mean': np.mean(solidities),
+        'solidity_std': np.std(solidities),
+        'solidity_min': np.min(solidities),
+        'solidity_max': np.max(solidities),
+        'convexity_mean': np.mean(convexities),
+        'convexity_std': np.std(convexities),
+        'convexity_min': np.min(convexities),
+        'convexity_max': np.max(convexities),
+        'extent_mean': np.mean(extents),
+        'extent_std': np.std(extents),
+        'extent_min': np.min(extents),
+        'extent_max': np.max(extents)
     }
     
     return stats
@@ -117,7 +132,7 @@ def export_results(df, format_type='csv'):
     elif format_type == 'excel':
         output = io.BytesIO()
         # Use the output buffer directly
-        with pd.ExcelWriter(output, engine='openpyxl', mode='w') as writer:
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, sheet_name='Spore_Measurements', index=False)
             
             # Add statistics sheet

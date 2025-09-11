@@ -178,6 +178,81 @@ def main():
             help="Exclude spores touching the image edges (incomplete spores)"
         )
         
+        # Enhanced shape filters
+        st.subheader("Advanced Shape Filters")
+        
+        aspect_ratio_min = st.slider(
+            "Minimum Aspect Ratio",
+            min_value=1.0,
+            max_value=10.0,
+            value=1.0,
+            step=0.1,
+            help="Minimum length/width ratio (1.0 = square, higher = more elongated)"
+        )
+        
+        aspect_ratio_max = st.slider(
+            "Maximum Aspect Ratio",
+            min_value=1.0,
+            max_value=10.0,
+            value=5.0,
+            step=0.1,
+            help="Maximum length/width ratio"
+        )
+        
+        solidity_min = st.slider(
+            "Minimum Solidity",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.5,
+            step=0.01,
+            help="Minimum solidity (spore area / convex hull area). Higher = less concave"
+        )
+        
+        solidity_max = st.slider(
+            "Maximum Solidity",
+            min_value=0.0,
+            max_value=1.0,
+            value=1.0,
+            step=0.01,
+            help="Maximum solidity"
+        )
+        
+        convexity_min = st.slider(
+            "Minimum Convexity",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.7,
+            step=0.01,
+            help="Minimum convexity (convex hull perimeter / spore perimeter). Higher = smoother outline"
+        )
+        
+        convexity_max = st.slider(
+            "Maximum Convexity",
+            min_value=0.0,
+            max_value=1.0,
+            value=1.0,
+            step=0.01,
+            help="Maximum convexity"
+        )
+        
+        extent_min = st.slider(
+            "Minimum Extent",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.3,
+            step=0.01,
+            help="Minimum extent (spore area / bounding rectangle area). Higher = fills bounding box better"
+        )
+        
+        extent_max = st.slider(
+            "Maximum Extent",
+            min_value=0.0,
+            max_value=1.0,
+            value=1.0,
+            step=0.01,
+            help="Maximum extent"
+        )
+        
         # Image processing parameters
         st.subheader("Image Processing")
         blur_kernel = st.slider(
@@ -285,6 +360,10 @@ def main():
                         min_area=min_area,
                         max_area=max_area,
                         circularity_range=(circularity_min, circularity_max),
+                        aspect_ratio_range=(aspect_ratio_min, aspect_ratio_max),
+                        solidity_range=(solidity_min, solidity_max),
+                        convexity_range=(convexity_min, convexity_max),
+                        extent_range=(extent_min, extent_max),
                         exclude_edges=exclude_edges,
                         blur_kernel=blur_kernel,
                         threshold_method=threshold_method,
@@ -357,7 +436,7 @@ def main():
         stats = calculate_statistics(selected_results)
         
         # Display statistics in columns
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
         
         with col1:
             st.metric("Total Spores", len(selected_results))
@@ -379,6 +458,11 @@ def main():
             st.metric("Max Width (μm)", f"{stats['width_max']:.2f}")
             st.metric("Mean Circularity", f"{stats['circularity_mean']:.3f}")
         
+        with col5:
+            st.metric("Mean Solidity", f"{stats['solidity_mean']:.3f}")
+            st.metric("Mean Convexity", f"{stats['convexity_mean']:.3f}")
+            st.metric("Mean Extent", f"{stats['extent_mean']:.3f}")
+        
         # Histograms
         st.subheader("📊 Distribution Plots")
         
@@ -389,7 +473,10 @@ def main():
             'Width_um': spore['width_um'],
             'Area_um2': spore['area_um2'],
             'Aspect_Ratio': spore['aspect_ratio'],
-            'Circularity': spore['circularity']
+            'Circularity': spore['circularity'],
+            'Solidity': spore['solidity'],
+            'Convexity': spore['convexity'],
+            'Extent': spore['extent']
         } for i, spore in enumerate(selected_results)])
         
         col1, col2 = st.columns(2)
@@ -436,6 +523,43 @@ def main():
             )
             st.plotly_chart(fig_aspect, use_container_width=True)
         
+        # Shape metrics distributions
+        st.subheader("🔸 Enhanced Shape Metrics")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            # Solidity distribution
+            fig_solidity = px.histogram(
+                df_results,
+                x='Solidity',
+                title='Solidity Distribution',
+                labels={'Solidity': 'Solidity (Area/Convex Hull Area)', 'count': 'Frequency'},
+                nbins=20
+            )
+            st.plotly_chart(fig_solidity, use_container_width=True)
+        
+        with col2:
+            # Convexity distribution
+            fig_convexity = px.histogram(
+                df_results,
+                x='Convexity',
+                title='Convexity Distribution',
+                labels={'Convexity': 'Convexity (Hull Perimeter/Perimeter)', 'count': 'Frequency'},
+                nbins=20
+            )
+            st.plotly_chart(fig_convexity, use_container_width=True)
+        
+        with col3:
+            # Extent distribution
+            fig_extent = px.histogram(
+                df_results,
+                x='Extent',
+                title='Extent Distribution',
+                labels={'Extent': 'Extent (Area/Bounding Rect Area)', 'count': 'Frequency'},
+                nbins=20
+            )
+            st.plotly_chart(fig_extent, use_container_width=True)
+        
         # Scatter plot: Length vs Width
         fig_scatter = px.scatter(
             df_results,
@@ -443,7 +567,7 @@ def main():
             y='Length_um',
             title='Spore Dimensions Scatter Plot',
             labels={'Width_um': 'Width (μm)', 'Length_um': 'Length (μm)'},
-            hover_data=['Spore_ID', 'Area_um2', 'Aspect_Ratio']
+            hover_data=['Spore_ID', 'Area_um2', 'Aspect_Ratio', 'Solidity', 'Convexity', 'Extent']
         )
         st.plotly_chart(fig_scatter, use_container_width=True)
         

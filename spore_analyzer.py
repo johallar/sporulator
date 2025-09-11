@@ -11,19 +11,29 @@ class SporeAnalyzer:
         self.min_area = 10  # minimum area in um^2
         self.max_area = 500  # maximum area in um^2
         self.circularity_range = (0.3, 0.9)  # min, max circularity
+        self.aspect_ratio_range = (1.0, 5.0)  # min, max aspect ratio (length/width)
+        self.solidity_range = (0.5, 1.0)  # min, max solidity (contour area / convex hull area)
+        self.convexity_range = (0.7, 1.0)  # min, max convexity (convex hull perimeter / contour perimeter)
+        self.extent_range = (0.3, 1.0)  # min, max extent (contour area / bounding rect area)
         self.exclude_edges = True
         self.blur_kernel = 5
         self.threshold_method = "Otsu"
         self.threshold_value = None
     
     def set_parameters(self, pixel_scale=1.0, min_area=10, max_area=500, 
-                      circularity_range=(0.3, 0.9), exclude_edges=True,
+                      circularity_range=(0.3, 0.9), aspect_ratio_range=(1.0, 5.0),
+                      solidity_range=(0.5, 1.0), convexity_range=(0.7, 1.0), 
+                      extent_range=(0.3, 1.0), exclude_edges=True,
                       blur_kernel=5, threshold_method="Otsu", threshold_value=None):
         """Set analysis parameters"""
         self.pixel_scale = pixel_scale
         self.min_area = min_area
         self.max_area = max_area
         self.circularity_range = circularity_range
+        self.aspect_ratio_range = aspect_ratio_range
+        self.solidity_range = solidity_range
+        self.convexity_range = convexity_range
+        self.extent_range = extent_range
         self.exclude_edges = exclude_edges
         self.blur_kernel = blur_kernel
         self.threshold_method = threshold_method
@@ -73,6 +83,33 @@ class SporeAnalyzer:
             return 0
         circularity = 4 * np.pi * area / (perimeter * perimeter)
         return min(circularity, 1.0)  # Cap at 1.0 for perfect circle
+    
+    def calculate_solidity(self, contour):
+        """Calculate solidity (contour area / convex hull area)"""
+        area = cv2.contourArea(contour)
+        hull = cv2.convexHull(contour)
+        hull_area = cv2.contourArea(hull)
+        if hull_area == 0:
+            return 0
+        return area / hull_area
+    
+    def calculate_convexity(self, contour):
+        """Calculate convexity (convex hull perimeter / contour perimeter)"""
+        perimeter = cv2.arcLength(contour, True)
+        hull = cv2.convexHull(contour)
+        hull_perimeter = cv2.arcLength(hull, True)
+        if perimeter == 0:
+            return 0
+        return hull_perimeter / perimeter
+    
+    def calculate_extent(self, contour):
+        """Calculate extent (contour area / bounding rectangle area)"""
+        area = cv2.contourArea(contour)
+        x, y, w, h = cv2.boundingRect(contour)
+        rect_area = w * h
+        if rect_area == 0:
+            return 0
+        return area / rect_area
     
     def is_touching_edge(self, contour, image_shape):
         """Check if contour touches image edges"""
@@ -144,6 +181,23 @@ class SporeAnalyzer:
         if circularity < self.circularity_range[0] or circularity > self.circularity_range[1]:
             return None
         
+        # Calculate additional shape metrics
+        solidity = self.calculate_solidity(contour)
+        convexity = self.calculate_convexity(contour)
+        extent = self.calculate_extent(contour)
+        
+        # Check solidity filter
+        if solidity < self.solidity_range[0] or solidity > self.solidity_range[1]:
+            return None
+        
+        # Check convexity filter
+        if convexity < self.convexity_range[0] or convexity > self.convexity_range[1]:
+            return None
+        
+        # Check extent filter
+        if extent < self.extent_range[0] or extent > self.extent_range[1]:
+            return None
+        
         # Check edge exclusion
         if self.exclude_edges and self.is_touching_edge(contour, image_shape):
             return None
@@ -157,6 +211,13 @@ class SporeAnalyzer:
         length_um = length_pixels / self.pixel_scale
         width_um = width_pixels / self.pixel_scale
         
+        # Calculate aspect ratio
+        aspect_ratio = length_um / width_um if width_um > 0 else 0
+        
+        # Check aspect ratio filter
+        if aspect_ratio < self.aspect_ratio_range[0] or aspect_ratio > self.aspect_ratio_range[1]:
+            return None
+        
         # Calculate centroid
         M = cv2.moments(contour)
         if M["m00"] != 0:
@@ -164,9 +225,6 @@ class SporeAnalyzer:
             cy = int(M["m01"] / M["m00"])
         else:
             cx, cy = 0, 0
-        
-        # Calculate aspect ratio
-        aspect_ratio = length_um / width_um if width_um > 0 else 0
         
         return {
             'contour': contour,
@@ -180,6 +238,9 @@ class SporeAnalyzer:
             'angle': angle,
             'aspect_ratio': aspect_ratio,
             'circularity': circularity,
+            'solidity': solidity,
+            'convexity': convexity,
+            'extent': extent,
             'perimeter': cv2.arcLength(contour, True)
         }
     
