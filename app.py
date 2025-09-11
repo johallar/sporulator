@@ -9,6 +9,7 @@ import io
 import base64
 from spore_analyzer import SporeAnalyzer
 from utils import calculate_statistics, create_overlay_image, export_results
+from calibration import StageCalibration
 
 # Configure page
 st.set_page_config(
@@ -21,12 +22,16 @@ st.set_page_config(
 # Initialize session state
 if 'spore_analyzer' not in st.session_state:
     st.session_state.spore_analyzer = SporeAnalyzer()
+if 'calibration' not in st.session_state:
+    st.session_state.calibration = StageCalibration()
 if 'image_uploaded' not in st.session_state:
     st.session_state.image_uploaded = False
 if 'analysis_complete' not in st.session_state:
     st.session_state.analysis_complete = False
 if 'selected_spores' not in st.session_state:
     st.session_state.selected_spores = set()
+if 'calibration_complete' not in st.session_state:
+    st.session_state.calibration_complete = False
 
 def main():
     st.title("🔬 Fungal Spore Analyzer")
@@ -38,14 +43,98 @@ def main():
         
         # Pixel scale calibration
         st.subheader("Calibration")
-        pixel_scale = st.number_input(
-            "Pixel Scale (pixels/μm)",
-            min_value=0.1,
-            max_value=100.0,
-            value=10.0,
-            step=0.1,
-            help="Number of pixels per micrometer. This converts pixel measurements to micrometers."
+        
+        # Calibration method selection
+        calibration_method = st.selectbox(
+            "Calibration Method",
+            ["Manual Entry", "Auto-Detect Scale Bar", "Auto-Detect Circular Object", "Upload Calibration Image"],
+            help="Choose how to determine the pixel scale"
         )
+        
+        if calibration_method == "Manual Entry":
+            pixel_scale = st.number_input(
+                "Pixel Scale (pixels/μm)",
+                min_value=0.1,
+                max_value=100.0,
+                value=10.0,
+                step=0.1,
+                help="Number of pixels per micrometer. This converts pixel measurements to micrometers."
+            )
+        
+        elif calibration_method == "Upload Calibration Image":
+            st.markdown("**Upload a calibration image with known measurements:**")
+            calibration_file = st.file_uploader(
+                "Choose calibration image",
+                type=['png', 'jpg', 'jpeg', 'tiff', 'tif'],
+                key="calibration_upload",
+                help="Upload an image containing a scale bar or known reference object"
+            )
+            
+            if calibration_file is not None:
+                # Load calibration image
+                cal_image = Image.open(calibration_file)
+                cal_array = np.array(cal_image)
+                
+                # Show calibration image
+                st.image(cal_image, caption="Calibration Image", width=300)
+                
+                # Reference type selection
+                ref_type = st.selectbox(
+                    "Reference Type",
+                    ["scale_bar", "circular_object"],
+                    format_func=lambda x: "Scale Bar" if x == "scale_bar" else "Circular Object"
+                )
+                
+                # Known measurement input
+                known_length = st.number_input(
+                    f"Known {'Length' if ref_type == 'scale_bar' else 'Diameter'} (μm)",
+                    min_value=0.1,
+                    max_value=1000.0,
+                    value=10.0,
+                    step=0.1
+                )
+                
+                if st.button("🔍 Auto-Detect Calibration", key="auto_calibrate"):
+                    with st.spinner("Detecting calibration reference..."):
+                        calibration_result = st.session_state.calibration.auto_detect_scale(
+                            cal_array, ref_type, known_length
+                        )
+                        
+                        if calibration_result['pixel_scale']:
+                            # Validate calibration results
+                            validation = st.session_state.calibration.validate_calibration(
+                                calibration_result['pixel_scale'], "microscopy"
+                            )
+                            
+                            st.session_state.pixel_scale = calibration_result['pixel_scale']
+                            st.session_state.calibration_complete = True
+                            
+                            # Show results
+                            if validation['is_valid']:
+                                st.success(f"✅ Calibration successful!")
+                            else:
+                                st.warning(f"⚠️ Calibration completed with warning: {validation['warning']}")
+                            
+                            st.metric("Detected Pixel Scale", f"{calibration_result['pixel_scale']:.2f} pixels/μm")
+                            st.metric("Detection Confidence", f"{calibration_result['confidence']*100:.0f}%")
+                            st.caption(f"Expected range: {validation['expected_range'][0]}-{validation['expected_range'][1]} pixels/μm")
+                            
+                            # Show visualization
+                            if calibration_result['visualization'] is not None:
+                                st.image(calibration_result['visualization'], 
+                                        caption="Detected Calibration Objects", width=300)
+                        else:
+                            st.error("❌ Could not detect calibration reference. Try manual entry or different image.")
+            
+            # Use detected or default pixel scale
+            pixel_scale = st.session_state.get('pixel_scale', 10.0)
+            st.info(f"Current pixel scale: {pixel_scale:.2f} pixels/μm")
+        
+        else:
+            # For auto-detect methods, show current pixel scale
+            pixel_scale = st.session_state.get('pixel_scale', 10.0)
+            st.info(f"Auto-detection will be performed on uploaded images")
+            st.info(f"Current pixel scale: {pixel_scale:.2f} pixels/μm")
         
         # Detection parameters
         st.subheader("Detection Parameters")
@@ -138,6 +227,53 @@ def main():
             # Store image in session state
             st.session_state.original_image = image_array
             st.session_state.image_uploaded = True
+            
+            # Auto-calibration option for main image
+            if calibration_method in ["Auto-Detect Scale Bar", "Auto-Detect Circular Object"]:
+                st.subheader("🎯 Auto-Calibration")
+                
+                ref_type = "scale_bar" if calibration_method == "Auto-Detect Scale Bar" else "circular_object"
+                
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    known_ref_length = st.number_input(
+                        f"Known {'Scale Bar Length' if ref_type == 'scale_bar' else 'Object Diameter'} (μm)",
+                        min_value=0.1,
+                        max_value=1000.0,
+                        value=10.0,
+                        step=0.1,
+                        key="main_calibration_length"
+                    )
+                
+                with col_b:
+                    if st.button("🔍 Auto-Calibrate from Image", key="main_auto_calibrate"):
+                        with st.spinner("Detecting calibration reference in image..."):
+                            calibration_result = st.session_state.calibration.auto_detect_scale(
+                                image_array, ref_type, known_ref_length
+                            )
+                            
+                            if calibration_result['pixel_scale']:
+                                # Validate calibration results
+                                validation = st.session_state.calibration.validate_calibration(
+                                    calibration_result['pixel_scale'], "microscopy"
+                                )
+                                
+                                st.session_state.pixel_scale = calibration_result['pixel_scale']
+                                pixel_scale = calibration_result['pixel_scale']
+                                st.session_state.calibration_complete = True
+                                
+                                if validation['is_valid']:
+                                    st.success(f"✅ Auto-calibration successful! Pixel scale: {pixel_scale:.2f} pixels/μm")
+                                else:
+                                    st.warning(f"⚠️ Auto-calibration completed with warning: {validation['warning']}")
+                                    st.info(f"Pixel scale: {pixel_scale:.2f} pixels/μm (expected: {validation['expected_range'][0]}-{validation['expected_range'][1]})")
+                                
+                                # Show visualization
+                                if calibration_result['visualization'] is not None:
+                                    st.image(calibration_result['visualization'], 
+                                            caption="Auto-Detected Calibration Objects", use_column_width=True)
+                            else:
+                                st.error("❌ Could not auto-detect calibration. Using manual pixel scale.")
             
             # Analysis button
             if st.button("🔍 Analyze Spores", type="primary"):
