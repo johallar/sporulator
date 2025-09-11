@@ -4,8 +4,17 @@ from scipy.spatial.distance import pdist, squareform
 from skimage import measure, morphology
 from skimage.segmentation import clear_border
 import math
+import os
+import logging
 from abc import ABC, abstractmethod
 from typing import List, Dict, Optional, Union, Tuple, Any
+
+try:
+    import onnxruntime as ort
+    ONNX_AVAILABLE = True
+except ImportError:
+    ONNX_AVAILABLE = False
+    ort = None
 
 class Detector(ABC):
     """
@@ -322,9 +331,14 @@ class SporeAnalyzer:
             List of spore measurement dictionaries, or None if no spores found.
         """
         if detector is not None:
-            # Use pluggable detector
-            candidates = detector.detect(image)
-            return self.analyze_candidates(image, candidates)
+            # Use pluggable detector with fallback to traditional method
+            try:
+                candidates = detector.detect(image)
+                return self.analyze_candidates(image, candidates)
+            except Exception as e:
+                # Log the error and fallback to traditional detection
+                logging.warning(f"Detector failed with error: {e}. Falling back to traditional detection.")
+                return self._analyze_image_traditional(image)
         else:
             # Use traditional detection pipeline (backward compatibility)
             return self._analyze_image_traditional(image)
@@ -432,3 +446,478 @@ class TraditionalDetector(Detector):
             candidates.append(candidate)
         
         return candidates
+
+
+def mask_to_contours(mask: np.ndarray, confidence_threshold: float = 0.5) -> List[np.ndarray]:
+    """
+    Convert a segmentation mask to OpenCV contours.
+    
+    This utility function can be reused by different detectors that output segmentation masks.
+    
+    Args:
+        mask: Segmentation mask as numpy array (H, W) with values 0-1 or 0-255
+        confidence_threshold: Threshold for binarizing the mask (for values 0-1)
+        
+    Returns:
+        List of OpenCV contours (numpy arrays)
+    """
+    try:
+        # Normalize mask to 0-255 if needed
+        if mask.dtype != np.uint8:
+            if mask.max() <= 1.0:
+                # Values are in 0-1 range
+                binary_mask = (mask > confidence_threshold).astype(np.uint8) * 255
+            else:
+                # Values are in 0-255 range
+                binary_mask = (mask > confidence_threshold * 255).astype(np.uint8) * 255
+        else:
+            binary_mask = (mask > confidence_threshold * 255).astype(np.uint8) * 255
+        
+        # Find contours
+        contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        return contours
+    except Exception as e:
+        logging.warning(f"Error converting mask to contours: {e}")
+        return []
+
+
+class YOLOSegOnnxDetector(Detector):
+    """
+    ONNX-based YOLO segmentation detector for spore detection.
+    
+    This detector uses a YOLO segmentation model via ONNX Runtime to detect spores
+    and provides segmentation masks that are converted to contours for measurement.
+    """
+    
+    def __init__(self, model_path: str = "attached_assets/models/spore_yolov8n-seg.onnx",
+                 confidence_threshold: float = 0.25, iou_threshold: float = 0.45,
+                 target_size: int = 1024):
+        """
+        Initialize YOLOSegOnnxDetector.
+        
+        Args:
+            model_path: Path to the ONNX model file
+            confidence_threshold: Minimum confidence score for detections (default: 0.25)
+            iou_threshold: IoU threshold for Non-Maximum Suppression (default: 0.45)
+            target_size: Target size for the long side of input image (default: 1024)
+        """
+        self.model_path = model_path
+        self.confidence_threshold = confidence_threshold
+        self.iou_threshold = iou_threshold
+        self.target_size = target_size
+        self.session = None
+        self.input_name = None
+        self.output_names = None
+        self.model_loaded = False
+        
+        # Set up logging
+        logging.basicConfig(level=logging.INFO)
+        self.logger = logging.getLogger(__name__)
+        
+        # Try to load the model
+        self._load_model()
+    
+    def _load_model(self):
+        """Load the ONNX model and cache it."""
+        if not ONNX_AVAILABLE:
+            self.logger.warning("ONNX Runtime not available. YOLOSegOnnxDetector will return empty results.")
+            return
+        
+        if not os.path.exists(self.model_path):
+            self.logger.warning(f"Model file not found at {self.model_path}. "
+                              f"YOLOSegOnnxDetector will return empty results.")
+            return
+        
+        try:
+            # Create ONNX Runtime session with CPU provider
+            providers = ['CPUExecutionProvider']
+            session_options = ort.SessionOptions()
+            session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+            
+            self.session = ort.InferenceSession(self.model_path, 
+                                              sess_options=session_options,
+                                              providers=providers)
+            
+            # Get input and output information
+            self.input_name = self.session.get_inputs()[0].name
+            self.output_names = [output.name for output in self.session.get_outputs()]
+            
+            self.model_loaded = True
+            self.logger.info(f"Successfully loaded ONNX model from {self.model_path}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to load ONNX model: {e}")
+            self.model_loaded = False
+    
+    def _preprocess_image(self, image: np.ndarray) -> Tuple[np.ndarray, float, Tuple[int, int]]:
+        """
+        Preprocess image for YOLO inference.
+        
+        Args:
+            image: Input image as numpy array (H, W, C) or (H, W)
+            
+        Returns:
+            Tuple of (preprocessed_image, scale_factor, original_shape)
+        """
+        # Convert to RGB if needed
+        if len(image.shape) == 3 and image.shape[2] == 3:
+            # Assume input is RGB
+            img = image.copy()
+        elif len(image.shape) == 3 and image.shape[2] == 4:
+            # Convert RGBA to RGB
+            img = cv2.cvtColor(image, cv2.COLOR_RGBA2RGB)
+        elif len(image.shape) == 2:
+            # Convert grayscale to RGB
+            img = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+        else:
+            img = image.copy()
+        
+        # Get original shape
+        original_shape = img.shape[:2]  # (H, W)
+        
+        # Calculate scale factor to resize image while preserving aspect ratio
+        h, w = original_shape
+        scale = min(self.target_size / h, self.target_size / w)
+        
+        # Resize image
+        new_h, new_w = int(h * scale), int(w * scale)
+        img_resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+        
+        # Create square image with padding
+        padded_img = np.full((self.target_size, self.target_size, 3), 114, dtype=np.uint8)
+        
+        # Calculate padding offsets (center the image)
+        pad_y = (self.target_size - new_h) // 2
+        pad_x = (self.target_size - new_w) // 2
+        
+        padded_img[pad_y:pad_y + new_h, pad_x:pad_x + new_w] = img_resized
+        
+        # Convert to float and normalize to [0, 1]
+        padded_img = padded_img.astype(np.float32) / 255.0
+        
+        # Convert to CHW format for YOLO
+        padded_img = np.transpose(padded_img, (2, 0, 1))  # (C, H, W)
+        
+        # Add batch dimension
+        padded_img = np.expand_dims(padded_img, axis=0)  # (1, C, H, W)
+        
+        return padded_img, scale, original_shape
+    
+    def _apply_nms(self, detections: np.ndarray, masks: Optional[np.ndarray] = None) -> Tuple[List[Dict], List[np.ndarray]]:
+        """
+        Apply Non-Maximum Suppression to filter overlapping detections.
+        
+        Args:
+            detections: Detection array with shape (N, 6) containing [x1, y1, x2, y2, conf, class]
+            masks: Optional mask array with shape (N, H, W)
+            
+        Returns:
+            Tuple of (filtered_detections, filtered_masks)
+        """
+        if len(detections) == 0:
+            return [], []
+        
+        # Extract bounding boxes and scores
+        boxes_xyxy = detections[:, :4]  # [x1, y1, x2, y2]
+        scores = detections[:, 4]  # confidence scores
+        
+        # Convert boxes from xyxy to xywh format for cv2.dnn.NMSBoxes
+        boxes_xywh = np.column_stack([
+            boxes_xyxy[:, 0],  # x
+            boxes_xyxy[:, 1],  # y
+            boxes_xyxy[:, 2] - boxes_xyxy[:, 0],  # width = x2 - x1
+            boxes_xyxy[:, 3] - boxes_xyxy[:, 1]   # height = y2 - y1
+        ])
+        
+        # Apply NMS using OpenCV
+        indices = cv2.dnn.NMSBoxes(
+            boxes_xywh.tolist(), 
+            scores.tolist(), 
+            self.confidence_threshold, 
+            self.iou_threshold
+        )
+        
+        filtered_detections = []
+        filtered_masks = []
+        
+        if len(indices) > 0:
+            # Flatten indices if it's a nested array
+            if isinstance(indices, np.ndarray) and indices.ndim > 1:
+                indices = indices.flatten()
+            
+            for i in indices:
+                detection_info = {
+                    'bbox': boxes_xyxy[i],  # Keep original xyxy format for downstream processing
+                    'confidence': float(scores[i]),
+                    'class': int(detections[i, 5]) if detections.shape[1] > 5 else 0
+                }
+                filtered_detections.append(detection_info)
+                
+                if masks is not None:
+                    filtered_masks.append(masks[i])
+        
+        return filtered_detections, filtered_masks
+    
+    def _postprocess_output(self, outputs: List[np.ndarray], scale: float, 
+                          original_shape: Tuple[int, int]) -> List[Dict[str, Any]]:
+        """
+        Postprocess YOLO outputs to extract detections and masks.
+        
+        Args:
+            outputs: List of ONNX model outputs
+            scale: Scale factor used during preprocessing
+            original_shape: Original image shape (H, W)
+            
+        Returns:
+            List of detection candidates with contours and confidence scores
+        """
+        try:
+            if not outputs or len(outputs) < 1:
+                return []
+            
+            # Extract main detection output (typically first output)
+            detections = outputs[0]  # Shape: (batch, detections, features)
+            
+            if len(detections.shape) == 3:
+                detections = detections[0]  # Remove batch dimension
+            
+            # Extract segmentation masks if available (YOLOv8-seg format)
+            # Must be done BEFORE confidence filtering to maintain index alignment
+            masks = None
+            original_detections = detections.copy()  # Keep original for mask extraction
+            
+            if len(outputs) > 1:
+                # YOLOv8-seg: outputs[1] contains prototype masks (batch, 32, mask_h, mask_w)
+                proto_masks = outputs[1]  # Prototype masks
+                if len(proto_masks.shape) == 4:
+                    proto_masks = proto_masks[0]  # Remove batch dimension: (32, mask_h, mask_w)
+                
+                # Extract mask coefficients from original (unfiltered) detection tensor
+                if original_detections.shape[1] >= 4 + 1 + 32:  # xyxy + conf + 32 mask coeffs
+                    mask_coeffs = original_detections[:, -32:]  # Shape: (num_detections, 32)
+                    
+                    # Decode masks using original detections for proper alignment
+                    if len(mask_coeffs) > 0:
+                        self.logger.debug(f"Decoding {len(mask_coeffs)} masks from prototypes shape {proto_masks.shape}")
+                        masks = self._decode_yolov8_masks(proto_masks, mask_coeffs, 
+                                                         original_detections[:, :4], original_shape, scale)
+                        if masks is not None and len(masks) > 0:
+                            self.logger.debug(f"Successfully decoded {len(masks)} masks")
+                        else:
+                            self.logger.warning("Mask decoding returned empty result")
+            
+            # Now apply confidence filtering to both detections and masks
+            conf_mask = None
+            if detections.shape[1] >= 5:  # Has confidence column
+                conf_mask = detections[:, 4] >= self.confidence_threshold
+                detections = detections[conf_mask]
+                
+                # Apply same confidence filtering to masks if they exist
+                if masks is not None:
+                    masks = masks[conf_mask]
+            
+            if len(detections) == 0:
+                return []
+            
+            # Apply NMS
+            filtered_detections, filtered_masks = self._apply_nms(detections, masks)
+            
+            # Convert to contours
+            candidates = []
+            for i, detection in enumerate(filtered_detections):
+                bbox = detection['bbox']
+                confidence = detection['confidence']
+                
+                # Scale back to original image coordinates
+                x1, y1, x2, y2 = bbox
+                
+                # Account for padding offset
+                pad_y = (self.target_size - int(original_shape[0] * scale)) // 2
+                pad_x = (self.target_size - int(original_shape[1] * scale)) // 2
+                
+                # Remove padding offset
+                x1 = (x1 - pad_x) / scale
+                y1 = (y1 - pad_y) / scale
+                x2 = (x2 - pad_x) / scale
+                y2 = (y2 - pad_y) / scale
+                
+                # Ensure coordinates are within image bounds
+                x1 = max(0, min(x1, original_shape[1]))
+                y1 = max(0, min(y1, original_shape[0]))
+                x2 = max(0, min(x2, original_shape[1]))
+                y2 = max(0, min(y2, original_shape[0]))
+                
+                # Create contour from mask or bounding box
+                if filtered_masks and i < len(filtered_masks):
+                    # Use segmentation mask
+                    mask = filtered_masks[i]
+                    
+                    # Resize mask to original image size
+                    mask_resized = cv2.resize(mask, (original_shape[1], original_shape[0]), 
+                                            interpolation=cv2.INTER_LINEAR)
+                    
+                    # Convert mask to contours
+                    contours = mask_to_contours(mask_resized, confidence_threshold=0.5)
+                    
+                    # Add each contour as a separate candidate
+                    for contour in contours:
+                        if cv2.contourArea(contour) > 0:  # Filter out empty contours
+                            candidates.append({
+                                'contour': contour,
+                                'confidence': confidence,
+                                'detection_type': 'segmentation'
+                            })
+                else:
+                    # Create contour from bounding box as fallback
+                    bbox_contour = np.array([
+                        [[int(x1), int(y1)]],
+                        [[int(x2), int(y1)]],
+                        [[int(x2), int(y2)]],
+                        [[int(x1), int(y2)]]
+                    ], dtype=np.int32)
+                    
+                    candidates.append({
+                        'contour': bbox_contour,
+                        'confidence': confidence,
+                        'detection_type': 'bbox'
+                    })
+            
+            return candidates
+            
+        except Exception as e:
+            self.logger.error(f"Error in postprocessing: {e}")
+            return []
+    
+    def detect(self, image: np.ndarray) -> List[Dict[str, Any]]:
+        """
+        Detect spore candidates using YOLO segmentation model.
+        
+        Args:
+            image: Input image as numpy array
+            
+        Returns:
+            List of detection candidates, each containing:
+            - 'contour': OpenCV contour (numpy array)
+            - 'confidence': Detection confidence score (0.0 to 1.0)
+            - 'detection_type': 'segmentation' or 'bbox' (optional metadata)
+        """
+        # Return empty list if model is not loaded
+        if not self.model_loaded or self.session is None:
+            self.logger.warning("Model not loaded. Returning empty detection results.")
+            return []
+        
+        try:
+            # Preprocess image
+            preprocessed_img, scale, original_shape = self._preprocess_image(image)
+            
+            # Run inference
+            outputs = self.session.run(self.output_names, {self.input_name: preprocessed_img})
+            
+            # Postprocess outputs
+            candidates = self._postprocess_output(outputs, scale, original_shape)
+            
+            self.logger.info(f"Detected {len(candidates)} spore candidates")
+            return candidates
+            
+        except Exception as e:
+            self.logger.error(f"Error during YOLO detection: {e}")
+            return []
+    
+    def _decode_yolov8_masks(self, proto_masks: np.ndarray, mask_coeffs: np.ndarray, 
+                           bboxes: np.ndarray, original_shape: Tuple[int, int], scale: float) -> np.ndarray:
+        """
+        Decode YOLOv8 segmentation masks from prototypes and coefficients.
+        
+        Args:
+            proto_masks: Prototype masks (32, mask_h, mask_w)
+            mask_coeffs: Mask coefficients (num_detections, 32)
+            bboxes: Bounding boxes in xyxy format (num_detections, 4)
+            original_shape: Original image shape (H, W)
+            scale: Scale factor used during preprocessing
+            
+        Returns:
+            Decoded masks (num_detections, original_h, original_w)
+        """
+        try:
+            # Validate inputs
+            if proto_masks is None or mask_coeffs is None:
+                self.logger.warning("Null inputs to mask decoder")
+                return np.array([])
+            
+            if len(proto_masks.shape) != 3 or proto_masks.shape[0] != 32:
+                self.logger.warning(f"Invalid proto_masks shape: {proto_masks.shape}, expected (32, H, W)")
+                return np.array([])
+            
+            if len(mask_coeffs.shape) != 2 or mask_coeffs.shape[1] != 32:
+                self.logger.warning(f"Invalid mask_coeffs shape: {mask_coeffs.shape}, expected (N, 32)")
+                return np.array([])
+            
+            # Get dimensions
+            mask_h, mask_w = proto_masks.shape[1], proto_masks.shape[2]
+            num_detections = mask_coeffs.shape[0]
+            
+            self.logger.debug(f"Decoding {num_detections} masks from prototypes {proto_masks.shape}")
+            
+            # Compute masks: proto @ coeffs.T
+            # Reshape proto_masks: (32, mask_h * mask_w)
+            proto_flat = proto_masks.reshape(32, -1)
+            # mask_coeffs: (num_detections, 32)
+            # Result: (num_detections, mask_h * mask_w)
+            masks_flat = np.matmul(mask_coeffs, proto_flat)
+            
+            # Reshape back to (num_detections, mask_h, mask_w)
+            masks = masks_flat.reshape(num_detections, mask_h, mask_w)
+            
+            # Apply sigmoid activation
+            masks = 1.0 / (1.0 + np.exp(-masks))
+            
+            # Upsample masks to target size
+            upsampled_masks = []
+            for i in range(num_detections):
+                mask = masks[i]
+                
+                # Resize to target_size (same size as preprocessing)
+                mask_resized = cv2.resize(mask, (self.target_size, self.target_size), 
+                                        interpolation=cv2.INTER_LINEAR)
+                
+                # Remove padding and scale to original image size
+                pad_y = (self.target_size - int(original_shape[0] * scale)) // 2
+                pad_x = (self.target_size - int(original_shape[1] * scale)) // 2
+                
+                # Crop to remove padding
+                scaled_h = int(original_shape[0] * scale)
+                scaled_w = int(original_shape[1] * scale)
+                mask_cropped = mask_resized[pad_y:pad_y + scaled_h, pad_x:pad_x + scaled_w]
+                
+                # Scale to original image size
+                mask_original = cv2.resize(mask_cropped, (original_shape[1], original_shape[0]), 
+                                         interpolation=cv2.INTER_LINEAR)
+                
+                # Optional: Crop mask to bbox area for better precision
+                x1, y1, x2, y2 = bboxes[i]
+                # Convert to original coordinates
+                x1_orig = max(0, int((x1 - pad_x) / scale))
+                y1_orig = max(0, int((y1 - pad_y) / scale))
+                x2_orig = min(original_shape[1], int((x2 - pad_x) / scale))
+                y2_orig = min(original_shape[0], int((y2 - pad_y) / scale))
+                
+                # Apply bbox cropping to mask (optional, can improve precision)
+                mask_bbox_cropped = np.zeros_like(mask_original)
+                if x2_orig > x1_orig and y2_orig > y1_orig:
+                    mask_bbox_cropped[y1_orig:y2_orig, x1_orig:x2_orig] = \
+                        mask_original[y1_orig:y2_orig, x1_orig:x2_orig]
+                    upsampled_masks.append(mask_bbox_cropped)
+                else:
+                    upsampled_masks.append(mask_original)
+            
+            return np.array(upsampled_masks) if upsampled_masks else np.array([])
+            
+        except Exception as e:
+            self.logger.error(f"Error decoding YOLOv8 masks: {e}")
+            return np.array([])
+    
+    def set_thresholds(self, confidence_threshold: float, iou_threshold: float):
+        """Update detection thresholds."""
+        self.confidence_threshold = confidence_threshold
+        self.iou_threshold = iou_threshold
