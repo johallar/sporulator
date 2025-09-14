@@ -50,8 +50,9 @@ def main():
         # Calibration method selection
         calibration_method = st.selectbox(
             "Calibration Method", [
-                "Manual Entry", "Auto-Detect Scale Bar",
-                "Auto-Detect Circular Object", "Upload Calibration Image"
+                "Manual Entry", "Auto-Detect Micrometer Divisions",
+                "Auto-Detect Scale Bar", "Auto-Detect Circular Object", 
+                "Upload Calibration Image"
             ],
             help="Choose how to determine the pixel scale")
 
@@ -65,6 +66,80 @@ def main():
                 help=
                 "Number of pixels per micrometer. This converts pixel measurements to micrometers."
             )
+
+        elif calibration_method == "Auto-Detect Micrometer Divisions":
+            st.markdown("**Upload an image with micrometer ruler divisions:**")
+            st.info("📏 This method detects tick marks on graduated rulers/micrometers. Assumes 1 division = 0.01mm (10μm)")
+            
+            calibration_file = st.file_uploader(
+                "Choose micrometer image",
+                type=['png', 'jpg', 'jpeg', 'tiff', 'tif'],
+                key="micrometer_upload",
+                help="Upload an image containing a graduated micrometer or ruler with tick marks"
+            )
+
+            if calibration_file is not None:
+                # Load calibration image
+                cal_image = Image.open(calibration_file)
+                cal_array = np.array(cal_image)
+
+                # Show calibration image
+                st.image(cal_image, caption="Micrometer Image", width=300)
+
+                # Division spacing input
+                division_spacing_um = st.number_input(
+                    "Distance per division (μm)",
+                    min_value=0.1,
+                    max_value=100.0,
+                    value=10.0,  # Default: 0.01mm = 10μm
+                    step=0.1,
+                    help="Distance between consecutive tick marks (0.01mm = 10μm)")
+
+                if st.button("🔍 Auto-Detect Divisions", key="auto_detect_divisions"):
+                    with st.spinner("Detecting micrometer divisions..."):
+                        calibration_result = st.session_state.calibration.auto_detect_scale(
+                            cal_array, "micrometer_divisions", division_spacing_um)
+
+                        if calibration_result['pixel_scale']:
+                            # Validate calibration results
+                            validation = st.session_state.calibration.validate_calibration(
+                                calibration_result['pixel_scale'], "microscopy")
+
+                            st.session_state.pixel_scale = calibration_result['pixel_scale']
+                            pixel_scale = calibration_result['pixel_scale']
+                            st.session_state.calibration_complete = True
+
+                            if validation['is_valid']:
+                                st.success(
+                                    f"✅ Micrometer calibration successful! Pixel scale: {pixel_scale:.2f} pixels/μm"
+                                )
+                            else:
+                                st.warning(
+                                    f"⚠️ Calibration completed with warning: {validation['warning']}"
+                                )
+                                st.info(
+                                    f"Pixel scale: {pixel_scale:.2f} pixels/μm (expected: {validation['expected_range'][0]}-{validation['expected_range'][1]})"
+                                )
+
+                            # Show detection metrics
+                            st.metric("Detected Pixel Scale", f"{pixel_scale:.2f} pixels/μm")
+                            st.metric("Detection Confidence", f"{calibration_result['confidence']*100:.0f}%")
+                            
+                            # Show detected divisions info
+                            divisions_info = calibration_result['detected_objects'][0]
+                            st.metric("Detected Divisions", f"{divisions_info['num_divisions']}")
+                            st.metric("Average Spacing", f"{divisions_info['spacing_pixels']:.1f} pixels")
+
+                            # Show visualization
+                            if calibration_result['visualization'] is not None:
+                                st.image(
+                                    calibration_result['visualization'],
+                                    caption="Detected Micrometer Divisions",
+                                    width='stretch')
+                        else:
+                            st.error(
+                                "❌ Could not detect micrometer divisions. Ensure the image shows clear tick marks."
+                            )
 
         elif calibration_method == "Upload Calibration Image":
             st.markdown(
@@ -87,17 +162,29 @@ def main():
 
                 # Reference type selection
                 ref_type = st.selectbox(
-                    "Reference Type", ["scale_bar", "circular_object"],
-                    format_func=lambda x: "Scale Bar"
-                    if x == "scale_bar" else "Circular Object")
+                    "Reference Type", ["scale_bar", "circular_object", "micrometer_divisions"],
+                    format_func=lambda x: "Scale Bar" if x == "scale_bar" 
+                                        else "Circular Object" if x == "circular_object"
+                                        else "Micrometer Divisions")
 
                 # Known measurement input
+                if ref_type == "micrometer_divisions":
+                    measurement_label = "Distance per division"
+                    help_text = "Distance between consecutive tick marks (e.g., 10μm for 0.01mm divisions)"
+                elif ref_type == "scale_bar":
+                    measurement_label = "Length"
+                    help_text = "Total length of the scale bar"
+                else:  # circular_object
+                    measurement_label = "Diameter"
+                    help_text = "Diameter of the circular reference object"
+                
                 known_length = st.number_input(
-                    f"Known {'Length' if ref_type == 'scale_bar' else 'Diameter'} (μm)",
+                    f"Known {measurement_label} (μm)",
                     min_value=0.1,
                     max_value=1000.0,
                     value=10.0,
-                    step=0.1)
+                    step=0.1,
+                    help=help_text)
 
                 if st.button("🔍 Auto-Detect Calibration",
                              key="auto_calibrate"):
