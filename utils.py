@@ -216,155 +216,156 @@ def create_overlay_image(original_image,
             # Selected spores - use line color for both contours and measurement lines
             contour_color = settings['line_color']
             text_color = (0, 255, 0)  # Green for spore numbers
+            
+            # Draw contour with 0.5 opacity using the line color
+            contour_temp = overlay.copy()
+            cv2.drawContours(contour_temp, [spore['contour']], -1, contour_color,
+                             2)
+            cv2.addWeighted(overlay, 0.5, contour_temp, 0.5, 0, overlay)
+
+            # Get measurement lines
+            lines = analyzer.get_measurement_lines(spore)
+
+            # Draw lines at full opacity with user settings
+            cv2.line(overlay, lines['length_line'][0], lines['length_line'][1],
+                     settings['line_color'], settings['line_width'])
+            cv2.line(overlay, lines['width_line'][0], lines['width_line'][1],
+                     settings['line_color'], settings['line_width'])
+
+            # Draw centroid
+            cv2.circle(overlay, lines['centroid'], 3, text_color, -1)
         else:
-            # Unselected spores - use dimmed line color
+            # Unselected spores - draw dimmed contour only (no measurement lines)
             contour_color = tuple(
-                int(c * 0.6) for c in settings['line_color'])  # Dimmed version
-            text_color = (255, 0, 0)  # Red for spore numbers
+                int(c * 0.3) for c in settings['line_color'])  # Very dimmed version
+            contour_temp = overlay.copy()
+            cv2.drawContours(contour_temp, [spore['contour']], -1, contour_color,
+                             1)  # Thinner line for unselected
+            cv2.addWeighted(overlay, 0.7, contour_temp, 0.3, 0, overlay)
 
-        # Draw contour with 0.5 opacity using the line color
-        contour_temp = overlay.copy()
-        cv2.drawContours(contour_temp, [spore['contour']], -1, contour_color,
-                         2)
-        cv2.addWeighted(overlay, 0.5, contour_temp, 0.5, 0, overlay)
-
-        # Get measurement lines
-        lines = analyzer.get_measurement_lines(spore)
-
-        # Draw lines at full opacity with user settings
-        cv2.line(overlay, lines['length_line'][0], lines['length_line'][1],
-                 settings['line_color'], settings['line_width'])
-        cv2.line(overlay, lines['width_line'][0], lines['width_line'][1],
-                 settings['line_color'], settings['line_width'])
-
-        # Draw centroid
-        cv2.circle(overlay, lines['centroid'], 3, text_color, -1)
-
-    # Second pass: Add multi-line text boxes with global collision detection
+    # Second pass: Add multi-line text boxes with global collision detection (ONLY for selected spores)
     for i, spore in enumerate(spore_results):
-        if i in selected_spores:
+        if i in selected_spores:  # Only draw text for selected spores
             text_color = (0, 255, 0)  # Green for selected spores
-        else:
-            text_color = (255, 0, 0)  # Red for unselected spores
 
-        # Get measurement lines for centroid
-        lines = analyzer.get_measurement_lines(spore)
-        centroid = lines['centroid']
+            # Get measurement lines for centroid
+            lines = analyzer.get_measurement_lines(spore)
+            centroid = lines['centroid']
 
-        # Create multi-line text
-        spore_number = str(i + 1)
-        line1 = f"#{spore_number}"
-        line2 = f"L: {spore['length_um']:.2f}"
-        line3 = f"W: {spore['width_um']:.2f}"
-        text_lines = [line1, line2, line3]
+            # Create multi-line text
+            spore_number = str(i + 1)
+            line1 = f"#{spore_number}"
+            line2 = f"L: {spore['length_um']:.2f}"
+            line3 = f"W: {spore['width_um']:.2f}"
+            text_lines = [line1, line2, line3]
 
-        font_scale = settings['font_size']
-        thickness = max(1, int(font_scale * 2))
-        
-        # Calculate text box dimensions
-        line_heights = []
-        max_width = 0
-        for line in text_lines:
-            line_size = cv2.getTextSize(line, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
-            line_width, line_height = line_size[0]
-            max_width = max(max_width, line_width)
-            line_heights.append(line_height)
-        
-        # Calculate total text box size with proper baseline accounting
-        line_spacing = 10  # Increased spacing for better readability
-        total_height = sum(line_heights) + (len(text_lines) - 1) * line_spacing
-        text_box_size = (max_width, total_height)
-        
-        # Calculate the actual text start position (accounting for baseline)
-        text_start_offset = line_heights[0]  # First line height for proper baseline positioning
-
-        # Initial positioning - try to place text box away from spore
-        contour = spore['contour']
-        x, y, w, h = cv2.boundingRect(contour)
-        
-        # Try different positions around the spore (adjusted for proper text baseline)
-        candidate_positions = [
-            (x + w + 20, y + text_start_offset),  # Right of spore
-            (x - max_width - 20, y + text_start_offset),  # Left of spore
-            (x, y - 20),  # Above spore
-            (x, y + h + total_height + 20),  # Below spore
-            (x + w + 20, y + h // 2 + text_start_offset),  # Right-center
-            (x - max_width - 20, y + h // 2 + text_start_offset),  # Left-center
-        ]
-        
-        # Find best position with global collision detection
-        text_x, text_y = None, None
-        for candidate_x, candidate_y in candidate_positions:
-            # Ensure position is within image bounds
-            candidate_x = max(0, min(overlay.shape[1] - max_width, candidate_x))
-            candidate_y = max(total_height, min(overlay.shape[0], candidate_y))
+            font_scale = settings['font_size']
+            thickness = max(1, int(font_scale * 2))
             
-            # Check if this position overlaps with any existing text rectangles
-            # The rectangle should start from where the first line will be drawn
-            candidate_rect = (candidate_x, candidate_y - text_start_offset, max_width, total_height)
-            overlap = False
+            # Calculate text box dimensions
+            line_heights = []
+            max_width = 0
+            for line in text_lines:
+                line_size = cv2.getTextSize(line, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
+                line_width, line_height = line_size[0]
+                max_width = max(max_width, line_width)
+                line_heights.append(line_height)
             
-            for existing_rect in global_text_rectangles:
-                if rectangles_overlap(candidate_rect, existing_rect):
-                    overlap = True
+            # Calculate total text box size with proper baseline accounting
+            line_spacing = 10  # Increased spacing for better readability
+            total_height = sum(line_heights) + (len(text_lines) - 1) * line_spacing
+            text_box_size = (max_width, total_height)
+            
+            # Calculate the actual text start position (accounting for baseline)
+            text_start_offset = line_heights[0]  # First line height for proper baseline positioning
+
+            # Initial positioning - try to place text box away from spore
+            contour = spore['contour']
+            x, y, w, h = cv2.boundingRect(contour)
+        
+            # Try different positions around the spore (adjusted for proper text baseline)
+            candidate_positions = [
+                (x + w + 20, y + text_start_offset),  # Right of spore
+                (x - max_width - 20, y + text_start_offset),  # Left of spore
+                (x, y - 20),  # Above spore
+                (x, y + h + total_height + 20),  # Below spore
+                (x + w + 20, y + h // 2 + text_start_offset),  # Right-center
+                (x - max_width - 20, y + h // 2 + text_start_offset),  # Left-center
+            ]
+        
+            # Find best position with global collision detection
+            text_x, text_y = None, None
+            for candidate_x, candidate_y in candidate_positions:
+                # Ensure position is within image bounds
+                candidate_x = max(0, min(overlay.shape[1] - max_width, candidate_x))
+                candidate_y = max(total_height, min(overlay.shape[0], candidate_y))
+                
+                # Check if this position overlaps with any existing text rectangles
+                # The rectangle should start from where the first line will be drawn
+                candidate_rect = (candidate_x, candidate_y - text_start_offset, max_width, total_height)
+                overlap = False
+                
+                for existing_rect in global_text_rectangles:
+                    if rectangles_overlap(candidate_rect, existing_rect):
+                        overlap = True
+                        break
+                        
+                if not overlap:
+                    text_x, text_y = candidate_x, candidate_y
                     break
-                    
-            if not overlap:
-                text_x, text_y = candidate_x, candidate_y
-                break
         
-        # If no non-overlapping position found, use adjust_text_position
-        if text_x is None or text_y is None:
-            text_x = x + w + 20
-            text_y = y + text_start_offset
-            text_x, text_y = adjust_text_position(
-                text_x, text_y, text_box_size, global_text_rectangles, overlay.shape)
+            # If no non-overlapping position found, use adjust_text_position
+            if text_x is None or text_y is None:
+                text_x = x + w + 20
+                text_y = y + text_start_offset
+                text_x, text_y = adjust_text_position(
+                    text_x, text_y, text_box_size, global_text_rectangles, overlay.shape)
 
-        # Store this text box rectangle for future collision detection
-        text_rect = (text_x, text_y - text_start_offset, max_width, total_height)
-        global_text_rectangles.append(text_rect)
+            # Store this text box rectangle for future collision detection
+            text_rect = (text_x, text_y - text_start_offset, max_width, total_height)
+            global_text_rectangles.append(text_rect)
 
-        # Draw connecting line from text box to centroid
-        # Connect from the center of text box to centroid
-        text_center_x = text_x + max_width // 2
-        text_center_y = text_y - text_start_offset + total_height // 2
-        
-        cv2.line(overlay, (text_center_x, text_center_y), centroid,
-                 settings['line_color'], 1)
+            # Draw connecting line from text box to centroid
+            # Connect from the center of text box to centroid
+            text_center_x = text_x + max_width // 2
+            text_center_y = text_y - text_start_offset + total_height // 2
+            
+            cv2.line(overlay, (text_center_x, text_center_y), centroid,
+                     settings['line_color'], 1)
 
-        # Add background rectangle with transparency if border_width > 0
-        if settings['border_width'] > 0:
-            # Create mask for background area
-            background_mask = np.zeros(overlay.shape[:2], dtype=np.uint8)
+            # Add background rectangle with transparency if border_width > 0
+            if settings['border_width'] > 0:
+                # Create mask for background area
+                background_mask = np.zeros(overlay.shape[:2], dtype=np.uint8)
 
-            # Define background rectangle area (properly aligned with text)
-            bg_rect = (max(0, text_x - settings['border_width']),
-                      max(0, text_y - text_start_offset - settings['border_width']),
-                      min(overlay.shape[1], text_x + max_width + settings['border_width']),
-                      min(overlay.shape[0], text_y - text_start_offset + total_height + settings['border_width']))
+                # Define background rectangle area (properly aligned with text)
+                bg_rect = (max(0, text_x - settings['border_width']),
+                          max(0, text_y - text_start_offset - settings['border_width']),
+                          min(overlay.shape[1], text_x + max_width + settings['border_width']),
+                          min(overlay.shape[0], text_y - text_start_offset + total_height + settings['border_width']))
 
-            # Fill mask area where background should be
-            cv2.rectangle(background_mask, (bg_rect[0], bg_rect[1]),
-                          (bg_rect[2], bg_rect[3]), 255, -1)
+                # Fill mask area where background should be
+                cv2.rectangle(background_mask, (bg_rect[0], bg_rect[1]),
+                              (bg_rect[2], bg_rect[3]), 255, -1)
 
-            # Create background overlay
-            background_overlay = overlay.copy()
-            cv2.rectangle(background_overlay, (bg_rect[0], bg_rect[1]),
-                          (bg_rect[2], bg_rect[3]),
-                          settings['border_color'], -1)
+                # Create background overlay
+                background_overlay = overlay.copy()
+                cv2.rectangle(background_overlay, (bg_rect[0], bg_rect[1]),
+                              (bg_rect[2], bg_rect[3]),
+                              settings['border_color'], -1)
 
-            # Apply 0.5 opacity only to background area using the mask
-            mask_3d = cv2.cvtColor(background_mask, cv2.COLOR_GRAY2BGR) / 255.0
-            overlay = overlay * (1 - mask_3d * 0.5) + background_overlay * (mask_3d * 0.5)
-            overlay = overlay.astype(np.uint8)
+                # Apply 0.5 opacity only to background area using the mask
+                mask_3d = cv2.cvtColor(background_mask, cv2.COLOR_GRAY2BGR) / 255.0
+                overlay = overlay * (1 - mask_3d * 0.5) + background_overlay * (mask_3d * 0.5)
+                overlay = overlay.astype(np.uint8)
 
-        # Draw multi-line text
-        current_y = text_y
-        for j, line in enumerate(text_lines):
-            cv2.putText(overlay, line, (text_x, current_y),
-                        cv2.FONT_HERSHEY_SIMPLEX, font_scale,
-                        settings['font_color'], thickness)
-            current_y += line_heights[j] + 10  # 10px spacing between lines
+            # Draw multi-line text
+            current_y = text_y
+            for j, line in enumerate(text_lines):
+                cv2.putText(overlay, line, (text_x, current_y),
+                            cv2.FONT_HERSHEY_SIMPLEX, font_scale,
+                            settings['font_color'], thickness)
+                current_y += line_heights[j] + 10  # 10px spacing between lines
 
     # Add enhanced legend with statistics in top-right corner
     if include_stats and selected_spores:
