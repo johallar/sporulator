@@ -68,14 +68,23 @@ def main():
             )
 
         elif calibration_method == "Auto-Detect Micrometer Divisions":
-            st.markdown("**Automatically detect micrometer divisions in uploaded image:**")
+            st.markdown("**Upload an image with micrometer ruler divisions:**")
             st.info("📏 This method detects tick marks on graduated rulers/micrometers. Assumes 1 division = 0.01mm (10μm)")
             
-            if not st.session_state.get('image_uploaded', False):
-                st.warning("⚠️ Please upload an image first (see Image Upload section below)")
-            else:
-                # Use the main uploaded image
-                cal_array = st.session_state.original_image
+            calibration_file = st.file_uploader(
+                "Choose micrometer image",
+                type=['png', 'jpg', 'jpeg', 'tiff', 'tif'],
+                key="micrometer_upload",
+                help="Upload an image containing a graduated micrometer or ruler with tick marks"
+            )
+
+            if calibration_file is not None:
+                # Load calibration image
+                cal_image = Image.open(calibration_file)
+                cal_array = np.array(cal_image)
+
+                # Show calibration image
+                st.image(cal_image, caption="Micrometer Image", width=300)
 
                 # Division spacing input
                 division_spacing_um = st.number_input(
@@ -540,9 +549,6 @@ def main():
 
         # Automatic analysis when image is uploaded  
         with st.spinner("Analyzing spores..."):
-            # Get pixel scale from session state or use default
-            pixel_scale = st.session_state.get('pixel_scale', 1.0)
-            
             # Configure analyzer
             analyzer = st.session_state.spore_analyzer
             analyzer.set_parameters(

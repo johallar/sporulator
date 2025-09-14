@@ -92,7 +92,7 @@ class StageCalibration:
         candidate_lines.sort(key=lambda x: x['quality_score'], reverse=True)
         return candidate_lines[0]
     
-    def detect_micrometer_divisions(self, image, min_tick_length=40, max_tick_length=180):
+    def detect_micrometer_divisions(self, image, min_tick_length=20, max_tick_length=100):
         """Detect graduated micrometer divisions (tick marks) and calculate spacing"""
         if len(image.shape) == 3:
             gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
@@ -101,136 +101,65 @@ class StageCalibration:
         
         h, w = gray.shape
         
-        # Apply morphological operations to enhance line detection
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-        enhanced = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, kernel)
+        # Apply edge detection optimized for detecting thin vertical lines (tick marks)
+        edges = cv2.Canny(gray, 50, 150, apertureSize=3)
         
-        # Apply edge detection with higher thresholds to reduce noise
-        edges = cv2.Canny(enhanced, 100, 200, apertureSize=3)
-        
-        # Detect lines using Hough transform with moderate threshold
-        lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=110, 
-                               minLineLength=min_tick_length, maxLineGap=8)
+        # Detect lines using Hough transform - looking for vertical tick marks
+        lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=20, 
+                               minLineLength=min_tick_length, maxLineGap=3)
         
         if lines is None:
             return None
         
-        # Accept lines at any angle - division marks can be oriented in any direction
-        division_lines = []
+        # Filter for vertical lines (tick marks) - look for lines that are mostly vertical
+        vertical_lines = []
         for line in lines:
             x1, y1, x2, y2 = line[0]
             length = np.sqrt((x2-x1)**2 + (y2-y1)**2)
             
-            # Calculate angle of the line
-            if x2 - x1 == 0:  # Vertical line
+            # Calculate angle - we want lines that are close to vertical (90 degrees)
+            if x2 - x1 == 0:  # Perfectly vertical
                 angle = 90
             else:
                 angle = np.abs(np.arctan2(y2-y1, x2-x1) * 180 / np.pi)
             
-            # Accept lines of sufficient length (filter out noise)
-            if min_tick_length <= length <= max_tick_length:
+            # Accept lines that are close to vertical (80-100 degrees)
+            if (80 <= angle <= 100) and (min_tick_length <= length <= max_tick_length):
                 # Calculate center point of the line
                 center_x = (x1 + x2) / 2
                 center_y = (y1 + y2) / 2
                 
-                # Calculate line direction for grouping
-                dx = x2 - x1
-                dy = y2 - y1
-                
-                division_lines.append({
+                vertical_lines.append({
                     'coords': (x1, y1, x2, y2),
                     'center_x': center_x,
                     'center_y': center_y,
                     'length': length,
-                    'angle': angle,
-                    'dx': dx,
-                    'dy': dy
+                    'angle': angle
                 })
         
-        if len(division_lines) < 3:  # Need at least 3 division marks
+        if len(vertical_lines) < 3:  # Need at least 3 tick marks to calculate spacing
             return None
         
-        # Group lines by orientation to find the dominant direction
-        angle_groups = {}
-        angle_tolerance = 15  # degrees
+        # Sort tick marks by x-position (left to right)
+        vertical_lines.sort(key=lambda x: x['center_x'])
         
-        for line in division_lines:
-            angle = line['angle']
-            
-            # Find existing group or create new one
-            group_found = False
-            for group_angle in angle_groups:
-                if abs(angle - group_angle) <= angle_tolerance:
-                    angle_groups[group_angle].append(line)
-                    group_found = True
-                    break
-            
-            if not group_found:
-                angle_groups[angle] = [line]
+        # Calculate spacings between consecutive tick marks
+        spacings = []
+        for i in range(1, len(vertical_lines)):
+            spacing = vertical_lines[i]['center_x'] - vertical_lines[i-1]['center_x']
+            spacings.append(spacing)
         
-        # Find the largest group (most consistent orientation)
-        if not angle_groups:
-            return None
-            
-        largest_group = max(angle_groups.values(), key=len)
+        # Use median spacing to avoid outliers
+        median_spacing = np.median(spacings) if spacings else None
         
-        # Need at least 4 divisions for reasonable confidence
-        if len(largest_group) < 4:
-            return None
-        
-        # Determine dominant direction and sort accordingly
-        sample_line = largest_group[0]
-        
-        # If lines are more horizontal, sort by x-position
-        # If lines are more vertical, sort by y-position
-        if abs(sample_line['angle']) < 45 or abs(sample_line['angle']) > 135:
-            # More horizontal - sort by x-position
-            largest_group.sort(key=lambda x: x['center_x'])
-            spacings = []
-            for i in range(1, len(largest_group)):
-                spacing = largest_group[i]['center_x'] - largest_group[i-1]['center_x']
-                spacings.append(spacing)
-        else:
-            # More vertical - sort by y-position
-            largest_group.sort(key=lambda x: x['center_y'])
-            spacings = []
-            for i in range(1, len(largest_group)):
-                spacing = largest_group[i]['center_y'] - largest_group[i-1]['center_y']
-                spacings.append(spacing)
-        
-        # Filter out spacings that are too small (likely noise) or too large (likely missed divisions)
-        if spacings:
-            median_spacing = np.median(spacings)
-            
-            # Moderately strict filtering - keep reasonably consistent spacings
-            filtered_spacings = [s for s in spacings if 0.7 * median_spacing <= s <= 1.3 * median_spacing]
-            
-            # Need at least 2 consistent spacings
-            if len(filtered_spacings) >= 2:
-                final_spacing = np.median(filtered_spacings)
-            else:
-                return None
-        else:
-            return None
-        
-        # Reject if spacing is too small (noise) or too large (not micrometer divisions)
-        if final_spacing <= 15 or final_spacing >= 300:  # Moderate spacing range
-            return None
-        
-        # Additional quality check - need reasonably consistent line lengths
-        line_lengths = [line['length'] for line in largest_group]
-        length_median = np.median(line_lengths)
-        consistent_lengths = [l for l in line_lengths if 0.6 * length_median <= l <= 1.4 * length_median]
-        
-        if len(consistent_lengths) < len(largest_group) * 0.7:  # 70% must have reasonably consistent length
+        if median_spacing is None or median_spacing <= 0:
             return None
         
         return {
-            'tick_marks': largest_group,
-            'spacing_pixels': final_spacing,
-            'num_divisions': len(largest_group) - 1,
-            'quality_score': min(len(largest_group) / 10.0, 1.0),  # Better with more tick marks
-            'dominant_angle': sample_line['angle']
+            'tick_marks': vertical_lines,
+            'spacing_pixels': median_spacing,
+            'num_divisions': len(vertical_lines) - 1,
+            'quality_score': min(len(vertical_lines) / 10.0, 1.0)  # Better with more tick marks
         }
 
     def detect_circular_objects(self, image, min_radius=10, max_radius=100):
