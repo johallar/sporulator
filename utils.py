@@ -207,7 +207,14 @@ def create_overlay_image(original_image,
     analyzer.pixel_scale = pixel_scale
 
     # Global text rectangles for collision detection across all spores
-    global_text_rectangles = []
+    # Cap collision detection to prevent hanging with too many objects
+    max_objects_for_collision = 200
+    use_collision_detection = len(spore_results) <= max_objects_for_collision
+    
+    if not use_collision_detection:
+        print(f"Warning: {len(spore_results)} spores detected. Disabling collision detection for performance.")
+    
+    global_text_rectangles = [] if use_collision_detection else None
 
     # First pass: Draw spores and measurement lines
     for i, spore in enumerate(spore_results):
@@ -298,30 +305,33 @@ def create_overlay_image(original_image,
             candidate_x = max(0, min(overlay.shape[1] - max_width, candidate_x))
             candidate_y = max(total_height, min(overlay.shape[0], candidate_y))
             
-            # Check if this position overlaps with any existing text rectangles
+            # Check if this position overlaps with any existing text rectangles (if collision detection enabled)
             # The rectangle should start from where the first line will be drawn
             candidate_rect = (candidate_x, candidate_y - text_start_offset, max_width, total_height)
             overlap = False
             
-            for existing_rect in global_text_rectangles:
-                if rectangles_overlap(candidate_rect, existing_rect):
-                    overlap = True
-                    break
+            if use_collision_detection and global_text_rectangles is not None:
+                for existing_rect in global_text_rectangles:
+                    if rectangles_overlap(candidate_rect, existing_rect):
+                        overlap = True
+                        break
                     
             if not overlap:
                 text_x, text_y = candidate_x, candidate_y
                 break
         
-        # If no non-overlapping position found, use adjust_text_position
+        # If no non-overlapping position found, use fallback position
         if text_x is None or text_y is None:
             text_x = x + w + 20
             text_y = y + text_start_offset
-            text_x, text_y = adjust_text_position(
-                text_x, text_y, text_box_size, global_text_rectangles, overlay.shape)
+            if use_collision_detection and global_text_rectangles is not None:
+                text_x, text_y = adjust_text_position(
+                    text_x, text_y, text_box_size, global_text_rectangles, overlay.shape)
 
-        # Store this text box rectangle for future collision detection
-        text_rect = (text_x, text_y - text_start_offset, max_width, total_height)
-        global_text_rectangles.append(text_rect)
+        # Store this text box rectangle for future collision detection (if enabled)
+        if use_collision_detection and global_text_rectangles is not None:
+            text_rect = (text_x, text_y - text_start_offset, max_width, total_height)
+            global_text_rectangles.append(text_rect)
 
         # Draw connecting line from text box to centroid
         # Connect from the center of text box to centroid
