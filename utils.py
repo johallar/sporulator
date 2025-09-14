@@ -111,8 +111,8 @@ def create_overlay_image(original_image, spore_results, selected_spores, pixel_s
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, text_color, 1)
         
         # Add measurement text at the end of each corresponding axis line
-        length_text = f"{spore['length_um']:.1f}μm"
-        width_text = f"{spore['width_um']:.1f}μm"
+        length_text = f"{spore['length_um']:.2f}um"
+        width_text = f"{spore['width_um']:.2f}um"
         
         # Position length text at the end of the length line
         length_end_x = lines['length_line'][1][0] + 10
