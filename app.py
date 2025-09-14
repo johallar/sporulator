@@ -645,6 +645,7 @@ def main():
                             st.session_state.selected_photo_idx = 0
 
                         # Display clickable thumbnails
+                        thumbnail_size = 100
                         for i, photo in enumerate(photos):
                             with cols[i]:
                                 # Convert URL to thumbnail size for smaller display
@@ -660,9 +661,8 @@ def main():
 
                                 # Show thumbnail with click functionality
                                 try:
-                                    st.image(
-                                        thumb_url,
-                                        width=100)  # Much smaller thumbnails
+                                    st.image(thumb_url, width=thumbnail_size
+                                             )  # Much smaller thumbnails
                                 except:
                                     st.write(f"📷 {i+1}")
 
@@ -671,7 +671,7 @@ def main():
                                 if st.button(
                                         button_label,
                                         key=f"select_photo_{i}",
-                                        use_container_width=True,
+                                        width=thumbnail_size,
                                 ):
                                     st.session_state.selected_photo_idx = i
                                     st.session_state.inaturalist_photo_changed = True
@@ -688,7 +688,7 @@ def main():
                     image_quality = st.selectbox(
                         "Image Quality",
                         ["large", "medium", "original"],
-                        index=2,  # Default to large
+                        index=2,  # Default to original
                         help=
                         "Choose image quality - larger images provide better analysis but take more time to load",
                         key="inaturalist_image_quality")
@@ -739,24 +739,30 @@ def main():
                         "❌ Invalid iNaturalist URL. Please enter a valid observation URL."
                     )
 
-    # Continue with analysis if image is loaded
+    # Store image in session state when loaded
     if image_array is not None:
-
-        # Store image in session state
         st.session_state.original_image = image_array
         st.session_state.image_uploaded = True
+        if upload_method == "File Upload":
+            st.session_state.image_source = "file"
+            st.session_state.display_image = image
+        else:
+            st.session_state.image_source = "inaturalist"
+            st.session_state.display_image = image_array
 
+    # Display image if we have one in session state (persist during reloads)
+    if st.session_state.get('image_uploaded', False) and 'original_image' in st.session_state:
         # Main content area - two columns for image display
         col1, col2 = st.columns([1, 1])
 
         with col1:
             st.subheader("Original Image")
-            if upload_method == "File Upload":
-                st.image(image, caption="Original Image", width='stretch')
+            # Always show the image from session state
+            display_image = st.session_state.get('display_image', st.session_state.original_image)
+            if st.session_state.get('image_source') == "file":
+                st.image(display_image, caption="Original Image", width='stretch')
             else:  # iNaturalist URL
-                st.image(image_array,
-                         caption="iNaturalist Image",
-                         width='stretch')
+                st.image(display_image, caption="iNaturalist Image", width='stretch')
         # Auto-calibration and analysis controls
         if calibration_method in [
                 "Auto-Detect Scale Bar", "Auto-Detect Circular Object"
@@ -781,7 +787,7 @@ def main():
                     with st.spinner(
                             "Detecting calibration reference in image..."):
                         calibration_result = st.session_state.calibration.auto_detect_scale(
-                            image_array, ref_type, known_ref_length)
+                            st.session_state.original_image, ref_type, known_ref_length)
 
                         if calibration_result['pixel_scale']:
                             # Validate calibration results
@@ -817,6 +823,9 @@ def main():
                                 "❌ Could not auto-detect calibration. Using manual pixel scale."
                             )
 
+        # Use stored image for analysis (persistent during reloads)
+        analysis_image = st.session_state.original_image
+        
         # Automatic analysis when image is uploaded
         with st.spinner("Analyzing spores..."):
             # Configure analyzer
@@ -841,8 +850,8 @@ def main():
                 separation_sigma=separation_sigma,
                 separation_erosion_iterations=separation_erosion_iterations)
 
-            # Perform analysis
-            results = analyzer.analyze_image(image_array)
+            # Perform analysis using persistent session state image
+            results = analyzer.analyze_image(analysis_image)
 
             if results is not None:
                 st.session_state.analysis_results = results
