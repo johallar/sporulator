@@ -92,7 +92,7 @@ class StageCalibration:
         candidate_lines.sort(key=lambda x: x['quality_score'], reverse=True)
         return candidate_lines[0]
     
-    def detect_micrometer_divisions(self, image, min_tick_length=30, max_tick_length=200):
+    def detect_micrometer_divisions(self, image, min_tick_length=50, max_tick_length=150):
         """Detect graduated micrometer divisions (tick marks) and calculate spacing"""
         if len(image.shape) == 3:
             gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
@@ -174,7 +174,8 @@ class StageCalibration:
             
         largest_group = max(angle_groups.values(), key=len)
         
-        if len(largest_group) < 3:
+        # Need at least 5 divisions to be confident it's a real micrometer
+        if len(largest_group) < 5:
             return None
         
         # Determine dominant direction and sort accordingly
@@ -200,17 +201,28 @@ class StageCalibration:
         # Filter out spacings that are too small (likely noise) or too large (likely missed divisions)
         if spacings:
             median_spacing = np.median(spacings)
-            # Keep spacings within 50% of median to remove outliers
-            filtered_spacings = [s for s in spacings if 0.5 * median_spacing <= s <= 1.5 * median_spacing]
             
-            if len(filtered_spacings) >= 2:  # Need at least 2 consistent spacings
+            # Much stricter filtering - only keep very consistent spacings
+            filtered_spacings = [s for s in spacings if 0.8 * median_spacing <= s <= 1.2 * median_spacing]
+            
+            # Need at least 3 very consistent spacings to be confident
+            if len(filtered_spacings) >= 3:
                 final_spacing = np.median(filtered_spacings)
             else:
-                final_spacing = median_spacing
+                return None
         else:
             return None
         
-        if final_spacing <= 5:  # Spacing too small, likely noise
+        # Reject if spacing is too small (noise) or too large (not micrometer divisions)
+        if final_spacing <= 20 or final_spacing >= 500:  # Much stricter spacing range
+            return None
+        
+        # Additional quality check - need very consistent line lengths
+        line_lengths = [line['length'] for line in largest_group]
+        length_median = np.median(line_lengths)
+        consistent_lengths = [l for l in line_lengths if 0.7 * length_median <= l <= 1.3 * length_median]
+        
+        if len(consistent_lengths) < len(largest_group) * 0.8:  # 80% must have consistent length
             return None
         
         return {
