@@ -42,34 +42,39 @@ def fetch_inaturalist_photos(observation_id):
         # Call iNaturalist API to get observation data
         api_url = f"https://api.inaturalist.org/v1/observations/{observation_id}"
         response = requests.get(api_url, timeout=10)
-        
+
         if response.status_code != 200:
             return None
-        
+
         data = response.json()
         results = data.get('results', [])
-        
+
         if not results:
             return None
-        
+
         # Get photos from the first result
         photos = results[0].get('photos', [])
         if not photos:
             return None
-        
+
         # Return photo metadata
         photo_info = []
         for i, photo in enumerate(photos):
             photo_info.append({
-                'id': photo.get('id'),
-                'url': photo.get('url', ''),
-                'attribution': photo.get('attribution', 'Unknown'),
-                'license': photo.get('license_code', 'Unknown'),
-                'index': i
+                'id':
+                photo.get('id'),
+                'url':
+                photo.get('url', ''),
+                'attribution':
+                photo.get('attribution', 'Unknown'),
+                'license':
+                photo.get('license_code', 'Unknown'),
+                'index':
+                i
             })
-        
+
         return photo_info
-        
+
     except Exception as e:
         st.error(f"Error fetching iNaturalist photos: {str(e)}")
         return None
@@ -91,7 +96,7 @@ def download_inaturalist_image(photo_url, size="large"):
                     break
             else:
                 image_url = photo_url
-        
+
         # Download the image
         img_response = requests.get(image_url, timeout=15)
         if img_response.status_code == 200:
@@ -99,9 +104,9 @@ def download_inaturalist_image(photo_url, size="large"):
             image = Image.open(io.BytesIO(img_response.content))
             image_array = np.array(image)
             return image_array
-        
+
         return None
-        
+
     except Exception as e:
         st.error(f"Error downloading iNaturalist image: {str(e)}")
         return None
@@ -124,7 +129,7 @@ def main():
         calibration_method = st.selectbox(
             "Calibration Method", [
                 "Manual Entry", "Auto-Detect Micrometer Divisions",
-                "Auto-Detect Scale Bar", "Auto-Detect Circular Object", 
+                "Auto-Detect Scale Bar", "Auto-Detect Circular Object",
                 "Upload Calibration Image"
             ],
             help="Choose how to determine the pixel scale")
@@ -142,13 +147,16 @@ def main():
 
         elif calibration_method == "Auto-Detect Micrometer Divisions":
             st.markdown("**Upload an image with micrometer ruler divisions:**")
-            st.info("📏 This method detects tick marks on graduated rulers/micrometers. Assumes 1 division = 0.01mm (10μm)")
-            
+            st.info(
+                "📏 This method detects tick marks on graduated rulers/micrometers. Assumes 1 division = 0.01mm (10μm)"
+            )
+
             calibration_file = st.file_uploader(
                 "Choose micrometer image",
                 type=['png', 'jpg', 'jpeg', 'tiff', 'tif'],
                 key="micrometer_upload",
-                help="Upload an image containing a graduated micrometer or ruler with tick marks"
+                help=
+                "Upload an image containing a graduated micrometer or ruler with tick marks"
             )
 
             if calibration_file is not None:
@@ -166,19 +174,24 @@ def main():
                     max_value=100.0,
                     value=10.0,  # Default: 0.01mm = 10μm
                     step=0.1,
-                    help="Distance between consecutive tick marks (0.01mm = 10μm)")
+                    help=
+                    "Distance between consecutive tick marks (0.01mm = 10μm)")
 
-                if st.button("🔍 Auto-Detect Divisions", key="auto_detect_divisions"):
+                if st.button("🔍 Auto-Detect Divisions",
+                             key="auto_detect_divisions"):
                     with st.spinner("Detecting micrometer divisions..."):
                         calibration_result = st.session_state.calibration.auto_detect_scale(
-                            cal_array, "micrometer_divisions", division_spacing_um)
+                            cal_array, "micrometer_divisions",
+                            division_spacing_um)
 
                         if calibration_result['pixel_scale']:
                             # Validate calibration results
                             validation = st.session_state.calibration.validate_calibration(
-                                calibration_result['pixel_scale'], "microscopy")
+                                calibration_result['pixel_scale'],
+                                "microscopy")
 
-                            st.session_state.pixel_scale = calibration_result['pixel_scale']
+                            st.session_state.pixel_scale = calibration_result[
+                                'pixel_scale']
                             pixel_scale = calibration_result['pixel_scale']
                             st.session_state.calibration_complete = True
 
@@ -195,13 +208,21 @@ def main():
                                 )
 
                             # Show detection metrics
-                            st.metric("Detected Pixel Scale", f"{pixel_scale:.2f} pixels/μm")
-                            st.metric("Detection Confidence", f"{calibration_result['confidence']*100:.0f}%")
-                            
+                            st.metric("Detected Pixel Scale",
+                                      f"{pixel_scale:.2f} pixels/μm")
+                            st.metric(
+                                "Detection Confidence",
+                                f"{calibration_result['confidence']*100:.0f}%")
+
                             # Show detected divisions info
-                            divisions_info = calibration_result['detected_objects'][0]
-                            st.metric("Detected Divisions", f"{divisions_info['num_divisions']}")
-                            st.metric("Average Spacing", f"{divisions_info['spacing_pixels']:.1f} pixels")
+                            divisions_info = calibration_result[
+                                'detected_objects'][0]
+                            st.metric("Detected Divisions",
+                                      f"{divisions_info['num_divisions']}")
+                            st.metric(
+                                "Average Spacing",
+                                f"{divisions_info['spacing_pixels']:.1f} pixels"
+                            )
 
                             # Show visualization
                             if calibration_result['visualization'] is not None:
@@ -235,10 +256,11 @@ def main():
 
                 # Reference type selection
                 ref_type = st.selectbox(
-                    "Reference Type", ["scale_bar", "circular_object", "micrometer_divisions"],
-                    format_func=lambda x: "Scale Bar" if x == "scale_bar" 
-                                        else "Circular Object" if x == "circular_object"
-                                        else "Micrometer Divisions")
+                    "Reference Type",
+                    ["scale_bar", "circular_object", "micrometer_divisions"],
+                    format_func=lambda x: "Scale Bar"
+                    if x == "scale_bar" else "Circular Object"
+                    if x == "circular_object" else "Micrometer Divisions")
 
                 # Known measurement input
                 if ref_type == "micrometer_divisions":
@@ -250,7 +272,7 @@ def main():
                 else:  # circular_object
                     measurement_label = "Diameter"
                     help_text = "Diameter of the circular reference object"
-                
+
                 known_length = st.number_input(
                     f"Known {measurement_label} (μm)",
                     min_value=0.1,
@@ -427,23 +449,26 @@ def main():
             exclude_touching = st.checkbox(
                 "Exclude touching/merged spores",
                 value=True,
-                help="Automatically detect and exclude spores that appear to be multiple touching spores incorrectly detected as single objects"
+                help=
+                "Automatically detect and exclude spores that appear to be multiple touching spores incorrectly detected as single objects"
             )
 
             touching_aggressiveness = st.selectbox(
                 "Detection Aggressiveness",
                 ["Conservative", "Balanced", "Aggressive"],
                 index=2,  # Default to "Aggressive" for better separation
-                help="Conservative: Fewer false positives, may miss some touching spores. Aggressive: More detections, may exclude some valid single spores."
+                help=
+                "Conservative: Fewer false positives, may miss some touching spores. Aggressive: More detections, may exclude some valid single spores."
             )
-            
+
             st.markdown("**⚡ Watershed Separation**")
             separate_touching = st.checkbox(
                 "Separate touching spores using watershed",
                 value=True,  # Enable by default for better separation
-                help="Use advanced watershed segmentation to automatically separate touching or overlapping spores into individual measurements"
+                help=
+                "Use advanced watershed segmentation to automatically separate touching or overlapping spores into individual measurements"
             )
-            
+
             if separate_touching:
                 separation_min_distance = st.slider(
                     "Separation Sensitivity",
@@ -451,25 +476,28 @@ def main():
                     max_value=10,
                     value=3,  # More aggressive than default 5
                     step=1,
-                    help="Lower values = more aggressive separation (more likely to split touching spores)"
+                    help=
+                    "Lower values = more aggressive separation (more likely to split touching spores)"
                 )
-                
+
                 separation_sigma = st.slider(
                     "Smoothing Factor",
                     min_value=0.5,
                     max_value=3.0,
                     value=0.8,  # More aggressive than default 1.0
                     step=0.1,
-                    help="Lower values = less smoothing (more sensitive to peaks for separation)"
+                    help=
+                    "Lower values = less smoothing (more sensitive to peaks for separation)"
                 )
-                
+
                 separation_erosion_iterations = st.slider(
                     "Erosion Strength",
                     min_value=1,
                     max_value=5,
                     value=2,  # More aggressive than default 1
                     step=1,
-                    help="Higher values = more erosion before separation (helps separate thicker connections)"
+                    help=
+                    "Higher values = more erosion before separation (helps separate thicker connections)"
                 )
             else:
                 separation_min_distance = 5
@@ -540,20 +568,20 @@ def main():
 
     # Image Upload Section (consolidated)
     st.header("📁 Image Upload")
-    
+
     # Upload method selection
     upload_method = st.radio(
-        "Upload Method",
-        ["File Upload", "iNaturalist URL"],
-        help="Choose to upload a file from your computer or load an image from an iNaturalist observation"
+        "Upload Method", ["File Upload", "iNaturalist URL"],
+        help=
+        "Choose to upload a file from your computer or load an image from an iNaturalist observation"
     )
-    
+
     if upload_method == "File Upload":
         uploaded_file = st.file_uploader(
             "Choose a microscopy image",
             type=['png', 'jpg', 'jpeg', 'tiff', 'tif', 'bmp'],
             help="Upload a microscopy image containing fungal spores")
-        
+
         image_array = None
         if uploaded_file is not None:
             # Load and display the image
@@ -565,95 +593,128 @@ def main():
         inaturalist_url = st.text_input(
             "iNaturalist Observation URL",
             placeholder="https://www.inaturalist.org/observations/123456789",
-            help="Enter the URL of an iNaturalist observation to analyze its images"
+            help=
+            "Enter the URL of an iNaturalist observation to analyze its images"
         )
-        
+
         image_array = None
         if inaturalist_url:
             # Extract observation ID from URL
             obs_match = re.search(r'/observations/(\d+)', inaturalist_url)
             if obs_match:
                 obs_id = obs_match.group(1)
-                
+
                 # Fetch photos button
                 if st.button("🔍 Fetch Available Photos", key="fetch_photos"):
-                    with st.spinner(f"Fetching photos from iNaturalist observation {obs_id}..."):
+                    with st.spinner(
+                            f"Fetching photos from iNaturalist observation {obs_id}..."
+                    ):
                         photos = fetch_inaturalist_photos(obs_id)
                         if photos:
                             st.session_state.inaturalist_photos = photos
                             st.session_state.obs_id = obs_id
-                            st.success(f"✅ Found {len(photos)} photo(s) in this observation!")
+                            st.success(
+                                f"✅ Found {len(photos)} photo(s) in this observation!"
+                            )
                         else:
-                            st.error("❌ Could not fetch photos from iNaturalist. Please check the URL.")
-                
+                            st.error(
+                                "❌ Could not fetch photos from iNaturalist. Please check the URL."
+                            )
+
                 # Show photo selection if photos are available
-                if 'inaturalist_photos' in st.session_state and st.session_state.get('obs_id') == obs_id:
+                if 'inaturalist_photos' in st.session_state and st.session_state.get(
+                        'obs_id') == obs_id:
                     photos = st.session_state.inaturalist_photos
-                    
+
                     st.markdown("**Select a photo to analyze:**")
-                    
-                    # Create photo selection interface
+
+                    # Create clickable photo selection interface
                     if len(photos) == 1:
                         selected_photo_idx = 0
-                        st.info("Only one photo available in this observation.")
+                        st.info(
+                            "Only one photo available in this observation.")
                     else:
-                        # Show thumbnails in a grid
-                        cols = st.columns(min(4, len(photos)))  # Max 4 columns
+                        # Show thumbnails in a single row with clickable selection
+                        cols = st.columns(len(photos))  # One column per photo
                         
-                        # Display thumbnail preview for each photo
-                        photo_options = []
+                        # Initialize selected photo index in session state
+                        if 'selected_photo_idx' not in st.session_state:
+                            st.session_state.selected_photo_idx = 0
+                        
+                        # Display clickable thumbnails
                         for i, photo in enumerate(photos):
-                            with cols[i % 4]:
-                                # Convert URL to small size for thumbnail
+                            with cols[i]:
+                                # Convert URL to thumbnail size for smaller display
                                 thumb_url = photo['url']
-                                for old_size in ['square', 'thumb', 'small', 'medium', 'large', 'original']:
+                                for old_size in [
+                                        'square', 'thumb', 'small', 'medium',
+                                        'large', 'original'
+                                ]:
                                     if f'/{old_size}.' in thumb_url:
-                                        thumb_url = thumb_url.replace(f'/{old_size}.', '/small.')
+                                        thumb_url = thumb_url.replace(
+                                            f'/{old_size}.', '/thumb.')
                                         break
                                 
+                                # Show thumbnail with click functionality
                                 try:
-                                    # Display thumbnail
-                                    st.image(thumb_url, caption=f"Photo {i+1}", width=150)
-                                    photo_options.append(f"Photo {i+1} (ID: {photo['id']})")
+                                    st.image(thumb_url, width=80)  # Much smaller thumbnails
                                 except:
-                                    st.write(f"Photo {i+1}")
-                                    photo_options.append(f"Photo {i+1} (ID: {photo['id']})")
+                                    st.write(f"📷 {i+1}")
+                                
+                                # Clickable button for selection
+                                button_label = f"{'✅ ' if st.session_state.selected_photo_idx == i else ''}Photo {i+1}"
+                                if st.button(button_label, key=f"select_photo_{i}", use_container_width=True):
+                                    st.session_state.selected_photo_idx = i
+                                    st.rerun()
                         
-                        # Photo selection dropdown
-                        selected_photo_idx = st.selectbox(
-                            "Choose photo to analyze:",
-                            range(len(photos)),
-                            format_func=lambda x: photo_options[x],
-                            help="Select which photo from the observation you want to analyze"
-                        )
-                    
+                        selected_photo_idx = st.session_state.selected_photo_idx
+                        
+                        # Show which photo is currently selected
+                        st.info(f"📸 Selected: Photo {selected_photo_idx + 1} (ID: {photos[selected_photo_idx]['id']})")
+
                     # Image quality selection
                     image_quality = st.selectbox(
                         "Image Quality",
                         ["large", "medium", "original"],
                         index=0,  # Default to large
-                        help="Choose image quality - larger images provide better analysis but take more time to load"
+                        help=
+                        "Choose image quality - larger images provide better analysis but take more time to load"
                     )
-                    
+
                     # Load selected photo button
-                    if st.button("📥 Load Selected Photo", key="load_selected_photo"):
+                    if st.button("📥 Load Selected Photo",
+                                 key="load_selected_photo"):
                         selected_photo = photos[selected_photo_idx]
-                        with st.spinner(f"Loading photo {selected_photo_idx + 1} at {image_quality} quality..."):
-                            image_array = download_inaturalist_image(selected_photo['url'], image_quality)
+                        with st.spinner(
+                                f"Loading photo {selected_photo_idx + 1} at {image_quality} quality..."
+                        ):
+                            image_array = download_inaturalist_image(
+                                selected_photo['url'], image_quality)
                             if image_array is not None:
                                 st.success("✅ Image loaded successfully!")
-                                st.image(image_array, caption=f"iNaturalist Observation {obs_id} - Photo {selected_photo_idx + 1}", width=300)
-                                
+                                st.image(
+                                    image_array,
+                                    caption=
+                                    f"iNaturalist Observation {obs_id} - Photo {selected_photo_idx + 1}",
+                                    width=300)
+
                                 # Show attribution
                                 if selected_photo['attribution'] != 'Unknown':
-                                    st.caption(f"📷 {selected_photo['attribution']}")
+                                    st.caption(
+                                        f"📷 {selected_photo['attribution']}")
                                 if selected_photo['license'] != 'Unknown':
-                                    st.caption(f"📄 License: {selected_photo['license']}")
+                                    st.caption(
+                                        f"📄 License: {selected_photo['license']}"
+                                    )
                             else:
-                                st.error("❌ Could not load the selected image.")
+                                st.error(
+                                    "❌ Could not load the selected image.")
             else:
-                if inaturalist_url.strip():  # Only show error if user has entered something
-                    st.error("❌ Invalid iNaturalist URL. Please enter a valid observation URL.")
+                if inaturalist_url.strip(
+                ):  # Only show error if user has entered something
+                    st.error(
+                        "❌ Invalid iNaturalist URL. Please enter a valid observation URL."
+                    )
 
     # Continue with analysis if image is loaded
     if image_array is not None:
@@ -670,7 +731,9 @@ def main():
             if upload_method == "File Upload":
                 st.image(image, caption="Original Image", width='stretch')
             else:  # iNaturalist URL
-                st.image(image_array, caption="iNaturalist Image", width='stretch')
+                st.image(image_array,
+                         caption="iNaturalist Image",
+                         width='stretch')
         # Auto-calibration and analysis controls
         if calibration_method in [
                 "Auto-Detect Scale Bar", "Auto-Detect Circular Object"
@@ -731,7 +794,7 @@ def main():
                                 "❌ Could not auto-detect calibration. Using manual pixel scale."
                             )
 
-        # Automatic analysis when image is uploaded  
+        # Automatic analysis when image is uploaded
         with st.spinner("Analyzing spores..."):
             # Configure analyzer
             analyzer = st.session_state.spore_analyzer
@@ -765,8 +828,7 @@ def main():
                 st.success(
                     f"Analysis complete! Detected {len(results)} spores.")
             else:
-                st.error(
-                    "No spores detected. Try adjusting the parameters.")
+                st.error("No spores detected. Try adjusting the parameters.")
 
         with col2:
             if st.session_state.analysis_complete:
@@ -777,7 +839,7 @@ def main():
                     hex_color = hex_color.lstrip('#')
                     # Extract RGB values and convert to BGR order
                     r = int(hex_color[0:2], 16)
-                    g = int(hex_color[2:4], 16) 
+                    g = int(hex_color[2:4], 16)
                     b = int(hex_color[4:6], 16)
                     return (b, g, r)  # BGR order for OpenCV
 
@@ -803,7 +865,7 @@ def main():
             else:
                 # Show skeleton placeholder while processing
                 st.info("🔄 Analysis in progress...")
-                
+
                 # Create skeleton placeholder for image
                 st.markdown("""
                 <div style="
@@ -827,11 +889,8 @@ def main():
                     100% { background-position: -200% 0; }
                 }
                 </style>
-                """, unsafe_allow_html=True)
-    else:
-        # Show empty state when no image is uploaded
-        st.subheader("📁 Upload an Image to Begin")
-        st.info("👆 Upload a microscopy image to automatically start spore analysis")
+                """,
+                            unsafe_allow_html=True)
 
     if st.session_state.analysis_complete and st.session_state.selected_spores:
         # Spore selection interface
