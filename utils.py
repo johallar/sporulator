@@ -391,19 +391,19 @@ def create_overlay_image(original_image,
             width_10th = np.percentile(widths, 10)
             width_90th = np.percentile(widths, 90)
             
-            # Create mycological format dimension string
-            dimension_str = f"({length_min:.1f}–) {length_10th:.1f}–{length_90th:.1f} (–{length_max:.1f}) × ({width_min:.1f}–) {width_10th:.1f}–{width_90th:.1f} (–{width_max:.1f}) µm"
+            # Create mycological format dimension string (using ASCII characters for OpenCV compatibility)
+            dimension_str = f"({length_min:.1f}-) {length_10th:.1f}-{length_90th:.1f} (-{length_max:.1f}) x ({width_min:.1f}-) {width_10th:.1f}-{width_90th:.1f} (-{width_max:.1f}) um"
             
-            # Create legend text lines with mycological format
+            # Create legend text lines with mycological format (ASCII only)
             legend_lines = [
                 f"n = {len(selected_results)} spores",
                 dimension_str,
-                f"Qm = {mean_q:.1f} ± {std_q:.1f}"
+                f"Qm = {mean_q:.1f} +/- {std_q:.1f}"
             ]
         else:
             legend_lines = ["No spores selected"]
     else:
-        legend_lines = ["Units: micrometers (µm)"]
+        legend_lines = ["Units: micrometers (um)"]
 
     # Increased font size
     legend_font_scale = 0.9
