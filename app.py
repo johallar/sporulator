@@ -604,8 +604,8 @@ def main():
             if obs_match:
                 obs_id = obs_match.group(1)
 
-                # Fetch photos button
-                if st.button("🔍 Fetch Available Photos", key="fetch_photos"):
+                # Automatically fetch photos when URL is entered or changed
+                if st.session_state.get('obs_id') != obs_id:
                     with st.spinner(
                             f"Fetching photos from iNaturalist observation {obs_id}..."
                     ):
@@ -613,6 +613,9 @@ def main():
                         if photos:
                             st.session_state.inaturalist_photos = photos
                             st.session_state.obs_id = obs_id
+                            # Reset photo selection when switching observations
+                            st.session_state.selected_photo_idx = 0
+                            st.session_state.inaturalist_photo_changed = True
                             st.success(
                                 f"✅ Found {len(photos)} photo(s) in this observation!"
                             )
