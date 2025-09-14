@@ -136,13 +136,13 @@ def create_overlay_image(original_image,
     # Use provided settings or defaults
     settings = vis_settings if vis_settings else default_settings
 
-    # Convert to RGB if needed
+    # Convert to BGR for OpenCV drawing operations
     if len(original_image.shape) == 3:
-        overlay = original_image.copy()
+        overlay = cv2.cvtColor(original_image, cv2.COLOR_RGB2BGR)
     else:
-        overlay = cv2.cvtColor(original_image, cv2.COLOR_GRAY2RGB)
+        overlay = cv2.cvtColor(original_image, cv2.COLOR_GRAY2BGR)
 
-    # Ensure RGB format
+    # Ensure uint8 format
     if overlay.dtype != np.uint8:
         overlay = (overlay * 255).astype(np.uint8)
 
@@ -289,6 +289,9 @@ def create_overlay_image(original_image,
     cv2.putText(overlay, legend_text, (legend_x, legend_y),
                 cv2.FONT_HERSHEY_SIMPLEX, legend_font_scale, (255, 255, 255),
                 legend_thickness)
+
+    # Convert back to RGB for Streamlit display
+    overlay = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
 
     return overlay
 
