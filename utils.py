@@ -117,6 +117,62 @@ def generate_mycological_summary(selected_results):
     return summary
 
 
+def rectangles_overlap(rect1, rect2):
+    """Check if two rectangles overlap.
+    Each rectangle is (x, y, width, height)
+    """
+    x1, y1, w1, h1 = rect1
+    x2, y2, w2, h2 = rect2
+    
+    # Add small padding to prevent touching text
+    padding = 5
+    
+    return not (x1 + w1 + padding < x2 or x2 + w2 + padding < x1 or 
+                y1 + h1 + padding < y2 or y2 + h2 + padding < y1)
+
+def adjust_text_position(x, y, text_size, existing_rects, image_shape):
+    """Adjust text position to avoid overlapping with existing text rectangles.
+    Returns (new_x, new_y)
+    """
+    width, height = text_size
+    img_width, img_height = image_shape[1], image_shape[0]
+    
+    # Try different positions around the original position
+    offsets = [
+        (0, 0),          # Original position
+        (0, -30),        # Above
+        (0, 30),         # Below  
+        (-30, 0),        # Left
+        (30, 0),         # Right
+        (-30, -30),      # Top-left
+        (30, -30),       # Top-right
+        (-30, 30),       # Bottom-left
+        (30, 30),        # Bottom-right
+    ]
+    
+    for offset_x, offset_y in offsets:
+        new_x = x + offset_x
+        new_y = y + offset_y
+        
+        # Ensure position is within image bounds
+        new_x = max(0, min(img_width - width, new_x))
+        new_y = max(height, min(img_height, new_y))
+        
+        # Check if this position overlaps with any existing rectangles
+        new_rect = (new_x, new_y - height, width, height)
+        overlap = False
+        
+        for existing_rect in existing_rects:
+            if rectangles_overlap(new_rect, existing_rect):
+                overlap = True
+                break
+                
+        if not overlap:
+            return new_x, new_y
+    
+    # If no non-overlapping position found, return adjusted original position
+    return max(0, min(img_width - width, x)), max(height, min(img_height, y))
+
 def create_overlay_image(original_image,
                          spore_results,
                          selected_spores,
@@ -203,6 +259,9 @@ def create_overlay_image(original_image,
             number_x = x + w + 10
         if number_y < number_size[1]:  # If too high, place below  
             number_y = y + h + number_size[1] + 10
+            
+        # Store text rectangles for collision detection
+        text_rectangles = []
         
         # Add background rectangle with transparency if border_width > 0
         if settings['border_width'] > 0:
@@ -269,6 +328,22 @@ def create_overlay_image(original_image,
         length_end_y = max(text_size_length[1], min(overlay.shape[0] - 5, length_end_y))
         width_end_x = max(text_size_width[0], min(overlay.shape[1] - text_size_width[0], width_end_x))  
         width_end_y = max(text_size_width[1], min(overlay.shape[0] - 5, width_end_y))
+        
+        # Add spore number rectangle to avoid overlaps
+        number_rect = (number_x, number_y - number_size[1], number_size[0], number_size[1])
+        text_rectangles.append(number_rect)
+        
+        # Adjust length text position to avoid overlapping with spore number
+        length_end_x, length_end_y = adjust_text_position(
+            length_end_x, length_end_y, text_size_length, text_rectangles, overlay.shape)
+        length_rect = (length_end_x, length_end_y - text_size_length[1], text_size_length[0], text_size_length[1])
+        text_rectangles.append(length_rect)
+        
+        # Adjust width text position to avoid overlapping with spore number and length text
+        width_end_x, width_end_y = adjust_text_position(
+            width_end_x, width_end_y, text_size_width, text_rectangles, overlay.shape)
+        width_rect = (width_end_x, width_end_y - text_size_width[1], text_size_width[0], text_size_width[1])
+        text_rectangles.append(width_rect)
 
         # Add background rectangles with transparency (0.5 opacity) if border_width > 0
         if settings['border_width'] > 0:
