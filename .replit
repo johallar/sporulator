@@ -2,7 +2,7 @@ modules = ["python-3.11"]
 
 [nix]
 channel = "stable-25_05"
-packages = ["freetype", "glibcLocales", "lcms2", "libGL", "libGLU", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "oneDNN", "openjpeg", "pkg-config", "re2", "tcl", "tk", "xsimd", "zlib"]
+packages = ["freetype", "glib", "glibcLocales", "lcms2", "libGL", "libGLU", "libglvnd", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "mesa", "oneDNN", "openjpeg", "pkg-config", "re2", "tcl", "tk", "xorg.libX11", "xorg.libXext", "xorg.libXrender", "xsimd", "zlib"]
 
 [deployment]
 deploymentTarget = "autoscale"
@@ -37,13 +37,13 @@ localPort = 5000
 externalPort = 80
 
 [[ports]]
-localPort = 33635
-externalPort = 3002
-
-[[ports]]
 localPort = 39037
 externalPort = 3000
 
 [[ports]]
 localPort = 39907
 externalPort = 3001
+
+[[ports]]
+localPort = 41975
+externalPort = 3002
