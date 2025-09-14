@@ -7,6 +7,8 @@ import plotly.graph_objects as go
 from PIL import Image
 import io
 import base64
+import requests
+import re
 from spore_analyzer import SporeAnalyzer
 from utils import calculate_statistics, create_overlay_image, export_results, generate_mycological_summary
 from calibration import StageCalibration
@@ -32,6 +34,60 @@ if 'calibration_complete' not in st.session_state:
     st.session_state.calibration_complete = False
 if 'analysis_results' not in st.session_state:
     st.session_state.analysis_results = []
+
+
+def fetch_inaturalist_image(observation_id, size="large"):
+    """Fetch image from iNaturalist observation"""
+    try:
+        # Call iNaturalist API to get observation data
+        api_url = f"https://api.inaturalist.org/v1/observations/{observation_id}"
+        response = requests.get(api_url, timeout=10)
+        
+        if response.status_code != 200:
+            return None
+        
+        data = response.json()
+        results = data.get('results', [])
+        
+        if not results:
+            return None
+        
+        # Get photos from the first result
+        photos = results[0].get('photos', [])
+        if not photos:
+            return None
+        
+        # Get the first photo
+        photo = photos[0]
+        photo_url = photo.get('url', '')
+        
+        # Convert URL to desired size
+        if '/square.jpg' in photo_url:
+            image_url = photo_url.replace('/square.jpg', f'/{size}.jpg')
+        elif '/thumb.jpg' in photo_url:
+            image_url = photo_url.replace('/thumb.jpg', f'/{size}.jpg')
+        else:
+            # Try to replace any size with the desired size
+            for old_size in ['thumb', 'small', 'medium', 'large', 'original']:
+                if f'/{old_size}.' in photo_url:
+                    image_url = photo_url.replace(f'/{old_size}.', f'/{size}.')
+                    break
+            else:
+                image_url = photo_url
+        
+        # Download the image
+        img_response = requests.get(image_url, timeout=15)
+        if img_response.status_code == 200:
+            # Convert to PIL Image and then to numpy array
+            image = Image.open(io.BytesIO(img_response.content))
+            image_array = np.array(image)
+            return image_array
+        
+        return None
+        
+    except Exception as e:
+        st.error(f"Error fetching iNaturalist image: {str(e)}")
+        return None
 
 
 def main():
@@ -467,15 +523,63 @@ def main():
 
     # Image Upload Section (consolidated)
     st.header("📁 Image Upload")
-    uploaded_file = st.file_uploader(
-        "Choose a microscopy image",
-        type=['png', 'jpg', 'jpeg', 'tiff', 'tif', 'bmp'],
-        help="Upload a microscopy image containing fungal spores")
+    
+    # Upload method selection
+    upload_method = st.radio(
+        "Upload Method",
+        ["File Upload", "iNaturalist URL"],
+        help="Choose to upload a file from your computer or load an image from an iNaturalist observation"
+    )
+    
+    if upload_method == "File Upload":
+        uploaded_file = st.file_uploader(
+            "Choose a microscopy image",
+            type=['png', 'jpg', 'jpeg', 'tiff', 'tif', 'bmp'],
+            help="Upload a microscopy image containing fungal spores")
+        
+        image_array = None
+        if uploaded_file is not None:
+            # Load and display the image
+            image = Image.open(uploaded_file)
+            image_array = np.array(image)
 
-    if uploaded_file is not None:
-        # Load image
-        image = Image.open(uploaded_file)
-        image_array = np.array(image)
+    elif upload_method == "iNaturalist URL":
+        st.markdown("**Load image from iNaturalist observation:**")
+        inaturalist_url = st.text_input(
+            "iNaturalist Observation URL",
+            placeholder="https://www.inaturalist.org/observations/123456789",
+            help="Enter the URL of an iNaturalist observation to analyze its images"
+        )
+        
+        image_quality = st.selectbox(
+            "Image Quality",
+            ["large", "medium", "original"],
+            index=0,  # Default to large
+            help="Choose image quality - larger images provide better analysis but take more time to load"
+        )
+        
+        image_array = None
+        if inaturalist_url:
+            # Extract observation ID from URL
+            import re
+            obs_match = re.search(r'/observations/(\d+)', inaturalist_url)
+            if obs_match:
+                obs_id = obs_match.group(1)
+                
+                if st.button("🔍 Load iNaturalist Image", key="load_inaturalist"):
+                    with st.spinner(f"Fetching image from iNaturalist observation {obs_id}..."):
+                        image_array = fetch_inaturalist_image(obs_id, image_quality)
+                        if image_array is not None:
+                            st.success("✅ Image loaded successfully!")
+                            st.image(image_array, caption=f"iNaturalist Observation {obs_id}", width=300)
+                        else:
+                            st.error("❌ Could not load image from iNaturalist. Please check the URL.")
+            else:
+                if inaturalist_url.strip():  # Only show error if user has entered something
+                    st.error("❌ Invalid iNaturalist URL. Please enter a valid observation URL.")
+
+    # Continue with analysis if image is loaded
+    if image_array is not None:
 
         # Store image in session state
         st.session_state.original_image = image_array
@@ -486,7 +590,10 @@ def main():
 
         with col1:
             st.subheader("Original Image")
-            st.image(image, caption="Original Image", width='stretch')
+            if upload_method == "File Upload":
+                st.image(image, caption="Original Image", width='stretch')
+            else:  # iNaturalist URL
+                st.image(image_array, caption="iNaturalist Image", width='stretch')
         # Auto-calibration and analysis controls
         if calibration_method in [
                 "Auto-Detect Scale Bar", "Auto-Detect Circular Object"
