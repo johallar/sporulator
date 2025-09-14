@@ -262,6 +262,21 @@ def main():
                                    step=0.01,
                                    help="Maximum extent")
 
+            # Touching spore detection
+            st.markdown("**🔍 Touching Spore Detection**")
+            exclude_touching = st.checkbox(
+                "Exclude touching/merged spores",
+                value=True,
+                help="Automatically detect and exclude spores that appear to be multiple touching spores incorrectly detected as single objects"
+            )
+
+            touching_aggressiveness = st.selectbox(
+                "Detection Aggressiveness",
+                ["Conservative", "Balanced", "Aggressive"],
+                index=1,  # Default to "Balanced"
+                help="Conservative: Fewer false positives, may miss some touching spores. Aggressive: More detections, may exclude some valid single spores."
+            )
+
         # Image processing parameters
         st.subheader("Image Processing")
         blur_kernel = st.slider(
@@ -423,7 +438,9 @@ def main():
                     exclude_edges=exclude_edges,
                     blur_kernel=blur_kernel,
                     threshold_method=threshold_method,
-                    threshold_value=threshold_value)
+                    threshold_value=threshold_value,
+                    exclude_touching=exclude_touching,
+                    touching_aggressiveness=touching_aggressiveness)
 
                 # Perform analysis
                 results = analyzer.analyze_image(image_array)

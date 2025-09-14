@@ -301,29 +301,33 @@ def export_results(df, format_type='csv'):
     if format_type == 'csv':
         return df.to_csv(index=False)
     elif format_type == 'excel':
-        output = io.BytesIO()
-        # Use the output buffer directly
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, sheet_name='Spore_Measurements', index=False)
+        try:
+            output = io.BytesIO()
+            # Use the output buffer directly
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df.to_excel(writer, sheet_name='Spore_Measurements', index=False)
 
-            # Add statistics sheet
-            stats_data = {
-                'Metric': [
-                    'Count', 'Mean Length (μm)', 'Std Length (μm)',
-                    'Mean Width (μm)', 'Std Width (μm)', 'Mean Area (μm²)',
-                    'Mean Aspect Ratio'
-                ],
-                'Value': [
-                    len(df), df['Length_um'].mean(), df['Length_um'].std(),
-                    df['Width_um'].mean(), df['Width_um'].std(),
-                    df['Area_um2'].mean(), df['Aspect_Ratio'].mean()
-                ]
-            }
-            stats_df = pd.DataFrame(stats_data)
-            stats_df.to_excel(writer, sheet_name='Statistics', index=False)
+                # Add statistics sheet
+                stats_data = {
+                    'Metric': [
+                        'Count', 'Mean Length (μm)', 'Std Length (μm)',
+                        'Mean Width (μm)', 'Std Width (μm)', 'Mean Area (μm²)',
+                        'Mean Aspect Ratio'
+                    ],
+                    'Value': [
+                        len(df), df['Length_um'].mean(), df['Length_um'].std(),
+                        df['Width_um'].mean(), df['Width_um'].std(),
+                        df['Area_um2'].mean(), df['Aspect_Ratio'].mean()
+                    ]
+                }
+                stats_df = pd.DataFrame(stats_data)
+                stats_df.to_excel(writer, sheet_name='Statistics', index=False)
 
-        output.seek(0)  # Reset buffer position
-        return output.getvalue()
+            output.seek(0)  # Reset buffer position
+            return output.getvalue()
+        except (ImportError, Exception):
+            # Fallback to CSV if openpyxl not available or other Excel errors
+            return df.to_csv(index=False)
     else:
         return df.to_csv(index=False)
 

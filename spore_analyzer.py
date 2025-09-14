@@ -55,12 +55,15 @@ class SporeAnalyzer:
         self.blur_kernel = 5
         self.threshold_method = "Otsu"
         self.threshold_value = None
+        self.exclude_touching = True  # exclude touching/merged spores
+        self.touching_aggressiveness = "Balanced"  # Conservative, Balanced, or Aggressive
     
     def set_parameters(self, pixel_scale=1.0, min_area=10, max_area=500, 
                       circularity_range=(0.3, 0.9), aspect_ratio_range=(1.0, 5.0),
                       solidity_range=(0.5, 1.0), convexity_range=(0.7, 1.0), 
                       extent_range=(0.3, 1.0), exclude_edges=True,
-                      blur_kernel=5, threshold_method="Otsu", threshold_value=None):
+                      blur_kernel=5, threshold_method="Otsu", threshold_value=None,
+                      exclude_touching=True, touching_aggressiveness="Balanced"):
         """Set analysis parameters"""
         self.pixel_scale = pixel_scale
         self.min_area = min_area
@@ -74,6 +77,8 @@ class SporeAnalyzer:
         self.blur_kernel = blur_kernel
         self.threshold_method = threshold_method
         self.threshold_value = threshold_value
+        self.exclude_touching = exclude_touching
+        self.touching_aggressiveness = touching_aggressiveness
     
     def preprocess_image(self, image):
         """Preprocess image for spore detection"""
@@ -147,6 +152,242 @@ class SporeAnalyzer:
             return 0
         return area / rect_area
     
+    def compute_convexity_defects_metrics(self, contour):
+        """
+        Count deep convexity defects to detect touching spores.
+        
+        Returns number of deep defects where depth is >= 4% of equivalent diameter.
+        Deep concavities often indicate multiple touching spores.
+        """
+        if len(contour) < 4:
+            return 0
+            
+        try:
+            # Get convex hull and defects
+            hull = cv2.convexHull(contour, returnPoints=False)
+            if len(hull) < 4:
+                return 0
+                
+            defects = cv2.convexityDefects(contour, hull)
+            if defects is None:
+                return 0
+            
+            # Calculate equivalent diameter for normalization
+            area = cv2.contourArea(contour)
+            if area <= 0:
+                return 0
+            equivalent_diameter = 2 * np.sqrt(area / np.pi)
+            
+            # Count deep defects (depth >= 4% of equivalent diameter)
+            deep_defect_threshold = 0.04 * equivalent_diameter
+            num_deep_defects = 0
+            
+            for defect in defects:
+                depth = defect[0][3] / 256.0  # OpenCV returns depth in fixed point
+                if depth >= deep_defect_threshold:
+                    num_deep_defects += 1
+                    
+            return num_deep_defects
+            
+        except Exception:
+            return 0
+    
+    def compute_ellipse_residual(self, contour, ellipse=None):
+        """
+        Compute irregularity score based on deviation from fitted ellipse.
+        
+        Higher values indicate more irregular shapes that may be touching spores.
+        Uses RMS radial deviation normalized by minor axis.
+        """
+        if len(contour) < 5:
+            return 0.0
+            
+        try:
+            # Fit ellipse if not provided
+            if ellipse is None:
+                ellipse = cv2.fitEllipse(contour)
+            
+            center, axes, angle = ellipse
+            cx, cy = center
+            major_axis, minor_axis = max(axes), min(axes)
+            
+            if minor_axis <= 0:
+                return 0.0
+            
+            # Convert angle to radians
+            angle_rad = np.radians(angle)
+            
+            # Calculate deviations for each contour point
+            deviations = []
+            for point in contour:
+                px, py = point[0]
+                
+                # Translate to ellipse center
+                dx = px - cx
+                dy = py - cy
+                
+                # Rotate to ellipse coordinate system
+                cos_a = np.cos(-angle_rad)
+                sin_a = np.sin(-angle_rad)
+                x_rot = dx * cos_a - dy * sin_a
+                y_rot = dx * sin_a + dy * cos_a
+                
+                # Calculate expected radius on ellipse at this angle
+                theta = np.arctan2(y_rot, x_rot)
+                expected_radius = (major_axis/2) * (minor_axis/2) / np.sqrt(
+                    ((minor_axis/2) * np.cos(theta))**2 + ((major_axis/2) * np.sin(theta))**2
+                )
+                
+                # Calculate actual radius
+                actual_radius = np.sqrt(x_rot**2 + y_rot**2)
+                
+                # Store deviation
+                deviation = abs(actual_radius - expected_radius)
+                deviations.append(deviation)
+            
+            # Calculate RMS deviation normalized by minor axis
+            if len(deviations) > 0:
+                rms_deviation = np.sqrt(np.mean(np.array(deviations)**2))
+                normalized_residual = rms_deviation / (minor_axis / 2)
+                return min(normalized_residual, 2.0)  # Cap at 2.0 for extreme cases
+            else:
+                return 0.0
+                
+        except Exception:
+            return 0.0
+    
+    def compute_area_outlier(self, area_um2, batch_stats):
+        """
+        Flag area outliers using robust z-score with MAD.
+        
+        Returns True if the area is an outlier (z > 2.5), which may indicate
+        multiple touching spores detected as one large object.
+        """
+        if batch_stats is None or 'areas' not in batch_stats:
+            return False
+            
+        areas = batch_stats['areas']
+        if len(areas) < 3:  # Need at least 3 spores for meaningful statistics
+            return False
+            
+        try:
+            # Calculate median and MAD (Median Absolute Deviation)
+            median_area = np.median(areas)
+            mad = np.median(np.abs(areas - median_area))
+            
+            if mad == 0:  # All areas are identical
+                return False
+                
+            # Calculate robust z-score
+            robust_z = 0.6745 * (area_um2 - median_area) / mad
+            
+            # Flag as outlier if z > 2.5 (indicating unusually large area)
+            return robust_z > 2.5
+            
+        except Exception:
+            return False
+    
+    def detect_touching_hard_rules(self, contour, solidity, convexity, ellipse_residual, area_outlier):
+        """
+        Apply hard rules to detect touching spores.
+        
+        Returns True if any hard rule indicates touching spores.
+        """
+        try:
+            # Count deep convexity defects
+            num_deep_defects = self.compute_convexity_defects_metrics(contour)
+            
+            # Hard rules for touching detection
+            rule_a = (solidity < 0.85 and num_deep_defects >= 1)
+            rule_b = (num_deep_defects >= 2)
+            rule_c = (convexity < 0.90 and ellipse_residual > 0.15)
+            rule_d = area_outlier
+            
+            return rule_a or rule_b or rule_c or rule_d
+            
+        except Exception:
+            return False
+    
+    def detect_touching_score_based(self, contour, solidity, convexity, ellipse_residual, aggressiveness="Balanced"):
+        """
+        Score-based touching detection with adjustable aggressiveness.
+        
+        Returns True if composite score indicates touching spores.
+        """
+        try:
+            # Count deep convexity defects
+            num_deep_defects = self.compute_convexity_defects_metrics(contour)
+            
+            # Calculate base composite score
+            S = (0.4 * max(0, 0.9 - solidity) + 
+                 0.2 * max(0, 0.95 - convexity) + 
+                 0.3 * min(1, num_deep_defects / 2) + 
+                 0.1 * ellipse_residual)
+            
+            # Adjust threshold based on aggressiveness
+            if aggressiveness == "Conservative":
+                threshold = 0.6  # Higher threshold, fewer detections
+            elif aggressiveness == "Aggressive":
+                threshold = 0.4  # Lower threshold, more detections
+            else:  # Balanced
+                threshold = 0.5  # Default threshold
+            
+            return S >= threshold
+            
+        except Exception:
+            return False
+    
+    def is_touching_spore(self, contour, solidity, convexity, area_um2, batch_stats=None):
+        """
+        Main touching spore detection method combining hard rules and score-based detection.
+        
+        Returns tuple: (is_touching, detection_details)
+        """
+        try:
+            # Calculate ellipse residual
+            ellipse_residual = self.compute_ellipse_residual(contour)
+            
+            # Check area outlier
+            area_outlier = self.compute_area_outlier(area_um2, batch_stats)
+            
+            # Apply hard rules
+            hard_rules_touching = self.detect_touching_hard_rules(
+                contour, solidity, convexity, ellipse_residual, area_outlier
+            )
+            
+            # Apply score-based detection
+            score_based_touching = self.detect_touching_score_based(
+                contour, solidity, convexity, ellipse_residual, self.touching_aggressiveness
+            )
+            
+            # Combine results (touching if either method detects it)
+            is_touching = hard_rules_touching or score_based_touching
+            
+            # Prepare detection details
+            num_deep_defects = self.compute_convexity_defects_metrics(contour)
+            
+            detection_details = {
+                'num_deep_defects': num_deep_defects,
+                'ellipse_residual': ellipse_residual,
+                'area_outlier': area_outlier,
+                'hard_rules_touching': hard_rules_touching,
+                'score_based_touching': score_based_touching,
+                'is_touching': is_touching
+            }
+            
+            return is_touching, detection_details
+            
+        except Exception:
+            # Return safe defaults on error
+            return False, {
+                'num_deep_defects': 0,
+                'ellipse_residual': 0.0,
+                'area_outlier': False,
+                'hard_rules_touching': False,
+                'score_based_touching': False,
+                'is_touching': False
+            }
+    
     def is_touching_edge(self, contour, image_shape):
         """Check if contour touches image edges"""
         h, w = image_shape[:2]
@@ -218,8 +459,8 @@ class SporeAnalyzer:
         else:
             return height, width, rect[2] + 90
     
-    def analyze_spore(self, contour, image_shape):
-        """Analyze a single spore contour"""
+    def analyze_spore(self, contour, image_shape, batch_stats=None):
+        """Analyze a single spore contour with optional touching detection"""
         # Calculate basic properties
         area_pixels = cv2.contourArea(contour)
         area_um2 = area_pixels / (self.pixel_scale ** 2)
@@ -270,6 +511,26 @@ class SporeAnalyzer:
         if aspect_ratio < self.aspect_ratio_range[0] or aspect_ratio > self.aspect_ratio_range[1]:
             return None
         
+        # Touching spore detection
+        touching_detected = False
+        touching_details = {
+            'num_deep_defects': 0,
+            'ellipse_residual': 0.0,
+            'area_outlier': False,
+            'hard_rules_touching': False,
+            'score_based_touching': False,
+            'is_touching': False
+        }
+        
+        if self.exclude_touching:
+            touching_detected, touching_details = self.is_touching_spore(
+                contour, solidity, convexity, area_um2, batch_stats
+            )
+            
+            # Filter out touching spores if enabled
+            if touching_detected:
+                return None
+        
         # Calculate centroid
         M = cv2.moments(contour)
         if M["m00"] != 0:
@@ -278,7 +539,8 @@ class SporeAnalyzer:
         else:
             cx, cy = 0, 0
         
-        return {
+        # Prepare result dictionary
+        result = {
             'contour': contour,
             'centroid': (cx, cy),
             'area_pixels': area_pixels,
@@ -293,8 +555,12 @@ class SporeAnalyzer:
             'solidity': solidity,
             'convexity': convexity,
             'extent': extent,
-            'perimeter': cv2.arcLength(contour, True)
+            'perimeter': cv2.arcLength(contour, True),
+            'touching_detected': touching_detected,
+            'touching_details': touching_details
         }
+        
+        return result
     
     def analyze_candidates(self, image: np.ndarray, candidates: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
         """
@@ -317,7 +583,29 @@ class SporeAnalyzer:
         if not candidates:
             return None
         
-        # Analyze each candidate using existing measurement logic
+        # Two-pass analysis for touching detection with batch statistics
+        batch_stats = None
+        
+        if self.exclude_touching:
+            # First pass: collect areas for batch statistics (basic filtering only)
+            areas = []
+            for candidate in candidates:
+                contour = candidate.get('contour')
+                if contour is None:
+                    continue
+                
+                # Basic area check
+                area_pixels = cv2.contourArea(contour)
+                area_um2 = area_pixels / (self.pixel_scale ** 2)
+                
+                if self.min_area <= area_um2 <= self.max_area:
+                    areas.append(area_um2)
+            
+            # Prepare batch statistics for area outlier detection
+            if len(areas) >= 3:  # Need at least 3 for meaningful statistics
+                batch_stats = {'areas': areas}
+        
+        # Second pass: analyze each candidate with complete filtering
         spore_results = []
         for candidate in candidates:
             # Extract contour from candidate
@@ -325,8 +613,8 @@ class SporeAnalyzer:
             if contour is None:
                 continue
                 
-            # Apply existing measurement and filtering logic
-            spore_data = self.analyze_spore(contour, image.shape)
+            # Apply complete measurement and filtering logic with batch stats
+            spore_data = self.analyze_spore(contour, image.shape, batch_stats)
             if spore_data is not None:
                 # Add confidence score if provided
                 if 'confidence' in candidate:
@@ -372,10 +660,28 @@ class SporeAnalyzer:
         if not contours:
             return None
         
-        # Analyze each contour
+        # Two-pass analysis for touching detection with batch statistics
+        batch_stats = None
+        
+        if self.exclude_touching:
+            # First pass: collect areas for batch statistics (basic filtering only)
+            areas = []
+            for contour in contours:
+                # Basic area check
+                area_pixels = cv2.contourArea(contour)
+                area_um2 = area_pixels / (self.pixel_scale ** 2)
+                
+                if self.min_area <= area_um2 <= self.max_area:
+                    areas.append(area_um2)
+            
+            # Prepare batch statistics for area outlier detection
+            if len(areas) >= 3:  # Need at least 3 for meaningful statistics
+                batch_stats = {'areas': areas}
+        
+        # Second pass: analyze each contour with complete filtering
         spore_results = []
         for contour in contours:
-            spore_data = self.analyze_spore(contour, image.shape)
+            spore_data = self.analyze_spore(contour, image.shape, batch_stats)
             if spore_data is not None:
                 spore_results.append(spore_data)
         
