@@ -61,8 +61,21 @@ def calculate_statistics(spore_results):
     
     return stats
 
-def create_overlay_image(original_image, spore_results, selected_spores, pixel_scale):
+def create_overlay_image(original_image, spore_results, selected_spores, pixel_scale, vis_settings=None):
     """Create an overlay image showing detected spores with measurement lines"""
+    # Default visualization settings
+    default_settings = {
+        'font_size': 1.6,
+        'font_color': (255, 255, 255),  # White
+        'border_color': (0, 0, 0),      # Black
+        'border_width': 8,
+        'line_color': (0, 255, 255),    # Yellow
+        'line_width': 2
+    }
+    
+    # Use provided settings or defaults
+    settings = vis_settings if vis_settings else default_settings
+    
     # Convert to RGB if needed
     if len(original_image.shape) == 3:
         overlay = original_image.copy()
@@ -73,6 +86,8 @@ def create_overlay_image(original_image, spore_results, selected_spores, pixel_s
     if overlay.dtype != np.uint8:
         overlay = (overlay * 255).astype(np.uint8)
     
+    # No need for a separate border overlay - we'll use temporary overlays per spore
+    
     from spore_analyzer import SporeAnalyzer
     analyzer = SporeAnalyzer()
     analyzer.pixel_scale = pixel_scale
@@ -82,25 +97,23 @@ def create_overlay_image(original_image, spore_results, selected_spores, pixel_s
         if i in selected_spores:
             # Selected spores - green
             contour_color = (0, 255, 0)  # Green
-            line_color = (255, 255, 0)   # Yellow
             text_color = (0, 255, 0)     # Green
         else:
             # Unselected spores - red
             contour_color = (255, 0, 0)  # Red
-            line_color = (255, 0, 255)   # Magenta
             text_color = (255, 0, 0)     # Red
         
-        # Draw contour
-        cv2.drawContours(overlay, [spore['contour']], -1, contour_color, 2)
+        # Draw contour with 0.5 opacity  
+        contour_temp = overlay.copy()
+        cv2.drawContours(contour_temp, [spore['contour']], -1, contour_color, 2)
+        cv2.addWeighted(overlay, 0.5, contour_temp, 0.5, 0, overlay)
         
         # Get measurement lines
         lines = analyzer.get_measurement_lines(spore)
         
-        # Draw length line (major axis)
-        cv2.line(overlay, lines['length_line'][0], lines['length_line'][1], line_color, 2)
-        
-        # Draw width line (minor axis)
-        cv2.line(overlay, lines['width_line'][0], lines['width_line'][1], line_color, 2)
+        # Draw lines at full opacity with user settings
+        cv2.line(overlay, lines['length_line'][0], lines['length_line'][1], settings['line_color'], settings['line_width'])
+        cv2.line(overlay, lines['width_line'][0], lines['width_line'][1], settings['line_color'], settings['line_width'])
         
         # Draw centroid
         cv2.circle(overlay, lines['centroid'], 3, text_color, -1)
@@ -110,9 +123,9 @@ def create_overlay_image(original_image, spore_results, selected_spores, pixel_s
                    (lines['centroid'][0] + 10, lines['centroid'][1] - 10),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, text_color, 1)
         
-        # Add measurement text at the end of each corresponding axis line
-        length_text = f"{spore['length_um']:.2f}um"
-        width_text = f"{spore['width_um']:.2f}um"
+        # Add measurement text with L/W prefixes, no units
+        length_text = f"L: {spore['length_um']:.2f}"
+        width_text = f"W: {spore['width_um']:.2f}"
         
         # Position length text at the end of the length line
         length_end_x = lines['length_line'][1][0] + 10
@@ -122,25 +135,75 @@ def create_overlay_image(original_image, spore_results, selected_spores, pixel_s
         width_end_x = lines['width_line'][1][0] + 10
         width_end_y = lines['width_line'][1][1] - 5
         
-        # Calculate text size for background rectangles - 2x larger font
-        font_scale = 1.6  # 2x larger than previous 0.8
-        thickness = 3
+        # Calculate text size for background rectangles
+        font_scale = settings['font_size']
+        thickness = max(1, int(font_scale * 2))
         text_size_length = cv2.getTextSize(length_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)[0]
         text_size_width = cv2.getTextSize(width_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)[0]
         
-        # Add background rectangles at the end of each axis line
-        cv2.rectangle(overlay, (length_end_x-8, length_end_y-text_size_length[1]-8), 
-                     (length_end_x + text_size_length[0]+8, length_end_y+8), 
-                     (0, 0, 0), -1)
-        cv2.rectangle(overlay, (width_end_x-8, width_end_y-text_size_width[1]-8), 
-                     (width_end_x + text_size_width[0]+8, width_end_y+8), 
-                     (0, 0, 0), -1)
+        # Add background rectangles with transparency (0.5 opacity) if border_width > 0
+        if settings['border_width'] > 0:
+            # Create mask for background areas only
+            background_mask = np.zeros(overlay.shape[:2], dtype=np.uint8)
+            
+            # Define background rectangle areas
+            length_rect = (
+                max(0, length_end_x - settings['border_width']),
+                max(0, length_end_y - text_size_length[1] - settings['border_width']),
+                min(overlay.shape[1], length_end_x + text_size_length[0] + settings['border_width']),
+                min(overlay.shape[0], length_end_y + settings['border_width'])
+            )
+            
+            width_rect = (
+                max(0, width_end_x - settings['border_width']),
+                max(0, width_end_y - text_size_width[1] - settings['border_width']),
+                min(overlay.shape[1], width_end_x + text_size_width[0] + settings['border_width']),
+                min(overlay.shape[0], width_end_y + settings['border_width'])
+            )
+            
+            # Fill mask areas where backgrounds should be
+            cv2.rectangle(background_mask, (length_rect[0], length_rect[1]), (length_rect[2], length_rect[3]), 255, -1)
+            cv2.rectangle(background_mask, (width_rect[0], width_rect[1]), (width_rect[2], width_rect[3]), 255, -1)
+            
+            # Create background overlay
+            background_overlay = overlay.copy()
+            cv2.rectangle(background_overlay, (length_rect[0], length_rect[1]), (length_rect[2], length_rect[3]), settings['border_color'], -1)
+            cv2.rectangle(background_overlay, (width_rect[0], width_rect[1]), (width_rect[2], width_rect[3]), settings['border_color'], -1)
+            
+            # Apply 0.5 opacity only to background areas using the mask
+            mask_3d = cv2.cvtColor(background_mask, cv2.COLOR_GRAY2BGR) / 255.0
+            overlay = overlay * (1 - mask_3d * 0.5) + background_overlay * (mask_3d * 0.5)
+            overlay = overlay.astype(np.uint8)
         
-        # Draw the measurement text at 2x larger size at the end of each axis
+        # Draw the measurement text at user-defined size (full opacity)
         cv2.putText(overlay, length_text, (length_end_x, length_end_y),
-                   cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), thickness)
+                   cv2.FONT_HERSHEY_SIMPLEX, font_scale, settings['font_color'], thickness)
         cv2.putText(overlay, width_text, (width_end_x, width_end_y),
-                   cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), thickness)
+                   cv2.FONT_HERSHEY_SIMPLEX, font_scale, settings['font_color'], thickness)
+    
+    # Add units legend in top-right corner
+    legend_text = "Units: micrometers (μm)"
+    legend_font_scale = 0.7
+    legend_thickness = 2
+    legend_size = cv2.getTextSize(legend_text, cv2.FONT_HERSHEY_SIMPLEX, legend_font_scale, legend_thickness)[0]
+    
+    # Position legend in top-right corner with full bounds checking
+    legend_x = max(10, min(overlay.shape[1] - legend_size[0] - 20, overlay.shape[1] - 30))
+    legend_y = max(legend_size[1] + 10, min(30, overlay.shape[0] - 20))
+    
+    # Create legend background with 0.5 opacity
+    legend_background = overlay.copy()
+    cv2.rectangle(legend_background, 
+                 (legend_x - 10, legend_y - legend_size[1] - 10), 
+                 (legend_x + legend_size[0] + 10, legend_y + 10), 
+                 (0, 0, 0), -1)
+    
+    # Blend legend background at 0.5 opacity
+    cv2.addWeighted(overlay, 0.5, legend_background, 0.5, 0, overlay)
+    
+    # Draw legend text at full opacity
+    cv2.putText(overlay, legend_text, (legend_x, legend_y),
+               cv2.FONT_HERSHEY_SIMPLEX, legend_font_scale, (255, 255, 255), legend_thickness)
     
     return overlay
 

@@ -280,6 +280,55 @@ def main():
             )
         else:
             threshold_value = None
+        
+        # Visualization settings
+        st.subheader("Visualization Settings")
+        
+        font_size = st.slider(
+            "Font Size",
+            min_value=0.5,
+            max_value=3.0,
+            value=1.6,
+            step=0.1,
+            help="Size of measurement text"
+        )
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            font_color = st.color_picker(
+                "Font Color",
+                value="#FFFFFF",
+                help="Color of measurement text"
+            )
+            
+            border_color = st.color_picker(
+                "Border Color", 
+                value="#000000",
+                help="Color of text background borders"
+            )
+            
+            line_color = st.color_picker(
+                "Line Color",
+                value="#FFFF00", 
+                help="Color of measurement lines"
+            )
+        
+        with col2:
+            border_width = st.slider(
+                "Border Width",
+                min_value=0,
+                max_value=10,
+                value=8,
+                help="Width of text background borders (0 = no border)"
+            )
+            
+            line_width = st.slider(
+                "Line Width",
+                min_value=1,
+                max_value=10,
+                value=2,
+                help="Width of measurement lines"
+            )
     
     # Main content area
     col1, col2 = st.columns([1, 1])
@@ -386,12 +435,27 @@ def main():
         if st.session_state.analysis_complete:
             st.header("🎯 Detection Results")
             
+            # Convert color picker hex values to BGR tuples for OpenCV
+            def hex_to_bgr(hex_color):
+                hex_color = hex_color.lstrip('#')
+                return tuple(int(hex_color[i:i+2], 16) for i in (4, 2, 0))  # BGR order
+            
+            visualization_settings = {
+                'font_size': font_size,
+                'font_color': hex_to_bgr(font_color),
+                'border_color': hex_to_bgr(border_color),
+                'border_width': border_width,
+                'line_color': hex_to_bgr(line_color),
+                'line_width': line_width
+            }
+            
             # Create overlay image
             overlay_image = create_overlay_image(
                 st.session_state.original_image,
                 st.session_state.analysis_results,
                 st.session_state.selected_spores,
-                pixel_scale
+                pixel_scale,
+                visualization_settings
             )
             
             st.image(overlay_image, caption="Detected Spores with Measurements", use_container_width=True)
