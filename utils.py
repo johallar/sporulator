@@ -187,12 +187,22 @@ def create_overlay_image(original_image,
         font_scale = settings['font_size']
         thickness = max(1, int(font_scale * 2))
         
-        # Position spore number near centroid but offset to avoid overlap
-        number_x = lines['centroid'][0] + 15
-        number_y = lines['centroid'][1] + 5
-        
-        # Calculate text size for background rectangle
+        # Calculate text size first
         number_size = cv2.getTextSize(spore_number, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)[0]
+        
+        # Calculate spore bounding box to position text outside spore area
+        contour = spore['contour']
+        x, y, w, h = cv2.boundingRect(contour)
+        
+        # Position spore number outside the spore's bounding box (top-left corner)
+        number_x = x - number_size[0] - 10  # Left of spore with padding
+        number_y = y - 5  # Above spore with padding
+        
+        # Ensure number stays within image bounds
+        if number_x < 0:  # If too far left, place to the right
+            number_x = x + w + 10
+        if number_y < number_size[1]:  # If too high, place below  
+            number_y = y + h + number_size[1] + 10
         
         # Add background rectangle with transparency if border_width > 0
         if settings['border_width'] > 0:
@@ -225,15 +235,7 @@ def create_overlay_image(original_image,
         length_text = f"L: {spore['length_um']:.2f}"
         width_text = f"W: {spore['width_um']:.2f}"
 
-        # Position length text at the end of the length line
-        length_end_x = lines['length_line'][1][0] + 10
-        length_end_y = lines['length_line'][1][1] - 5
-
-        # Position width text at the end of the width line
-        width_end_x = lines['width_line'][1][0] + 10
-        width_end_y = lines['width_line'][1][1] - 5
-
-        # Calculate text size for background rectangles
+        # Calculate text size for background rectangles first
         font_scale = settings['font_size']
         thickness = max(1, int(font_scale * 2))
         text_size_length = cv2.getTextSize(length_text,
@@ -241,6 +243,32 @@ def create_overlay_image(original_image,
                                            font_scale, thickness)[0]
         text_size_width = cv2.getTextSize(width_text, cv2.FONT_HERSHEY_SIMPLEX,
                                           font_scale, thickness)[0]
+
+        # Smart positioning for length text - place outside spore boundary
+        length_line_end = lines['length_line'][1]
+        
+        # Check if the line end is close to spore boundary and offset accordingly
+        length_offset_x = 15 if length_line_end[0] > lines['centroid'][0] else -text_size_length[0] - 15
+        length_offset_y = -10 if length_line_end[1] < lines['centroid'][1] else 25
+        
+        length_end_x = length_line_end[0] + length_offset_x
+        length_end_y = length_line_end[1] + length_offset_y
+
+        # Smart positioning for width text - place outside spore boundary  
+        width_line_end = lines['width_line'][1]
+        
+        # Check if the line end is close to spore boundary and offset accordingly
+        width_offset_x = 15 if width_line_end[0] > lines['centroid'][0] else -text_size_width[0] - 15
+        width_offset_y = -10 if width_line_end[1] < lines['centroid'][1] else 25
+        
+        width_end_x = width_line_end[0] + width_offset_x
+        width_end_y = width_line_end[1] + width_offset_y
+        
+        # Ensure text stays within image bounds
+        length_end_x = max(text_size_length[0], min(overlay.shape[1] - text_size_length[0], length_end_x))
+        length_end_y = max(text_size_length[1], min(overlay.shape[0] - 5, length_end_y))
+        width_end_x = max(text_size_width[0], min(overlay.shape[1] - text_size_width[0], width_end_x))  
+        width_end_y = max(text_size_width[1], min(overlay.shape[0] - 5, width_end_y))
 
         # Add background rectangles with transparency (0.5 opacity) if border_width > 0
         if settings['border_width'] > 0:
