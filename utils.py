@@ -290,113 +290,68 @@ def create_overlay_image(original_image,
         cv2.putText(overlay, spore_number, (number_x, number_y),
                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, settings['font_color'], thickness)
 
-        # Add measurement text with L/W prefixes, no units
-        length_text = f"L: {spore['length_um']:.2f}"
-        width_text = f"W: {spore['width_um']:.2f}"
+        # Add consolidated measurement text with L/W in one box
+        measurements_text = f"L: {spore['length_um']:.2f}, W: {spore['width_um']:.2f}"
 
-        # Calculate text size for background rectangles first
+        # Calculate text size for the consolidated measurement text
         font_scale = settings['font_size']
         thickness = max(1, int(font_scale * 2))
-        text_size_length = cv2.getTextSize(length_text,
+        measurements_size = cv2.getTextSize(measurements_text,
                                            cv2.FONT_HERSHEY_SIMPLEX,
                                            font_scale, thickness)[0]
-        text_size_width = cv2.getTextSize(width_text, cv2.FONT_HERSHEY_SIMPLEX,
-                                          font_scale, thickness)[0]
 
-        # Smart positioning for length text - place outside spore boundary
+        # Smart positioning for consolidated measurements - place near length line end
         length_line_end = lines['length_line'][1]
         
         # Check if the line end is close to spore boundary and offset accordingly
-        length_offset_x = 15 if length_line_end[0] > lines['centroid'][0] else -text_size_length[0] - 15
-        length_offset_y = -10 if length_line_end[1] < lines['centroid'][1] else 25
+        measurements_offset_x = 15 if length_line_end[0] > lines['centroid'][0] else -measurements_size[0] - 15
+        measurements_offset_y = -10 if length_line_end[1] < lines['centroid'][1] else 25
         
-        length_end_x = length_line_end[0] + length_offset_x
-        length_end_y = length_line_end[1] + length_offset_y
-
-        # Smart positioning for width text - place outside spore boundary  
-        width_line_end = lines['width_line'][1]
-        
-        # Check if the line end is close to spore boundary and offset accordingly
-        width_offset_x = 15 if width_line_end[0] > lines['centroid'][0] else -text_size_width[0] - 15
-        width_offset_y = -10 if width_line_end[1] < lines['centroid'][1] else 25
-        
-        width_end_x = width_line_end[0] + width_offset_x
-        width_end_y = width_line_end[1] + width_offset_y
+        measurements_x = length_line_end[0] + measurements_offset_x
+        measurements_y = length_line_end[1] + measurements_offset_y
         
         # Ensure text stays within image bounds
-        length_end_x = max(text_size_length[0], min(overlay.shape[1] - text_size_length[0], length_end_x))
-        length_end_y = max(text_size_length[1], min(overlay.shape[0] - 5, length_end_y))
-        width_end_x = max(text_size_width[0], min(overlay.shape[1] - text_size_width[0], width_end_x))  
-        width_end_y = max(text_size_width[1], min(overlay.shape[0] - 5, width_end_y))
+        measurements_x = max(0, min(overlay.shape[1] - measurements_size[0], measurements_x))
+        measurements_y = max(measurements_size[1], min(overlay.shape[0] - 5, measurements_y))
         
         # Add spore number rectangle to avoid overlaps
         number_rect = (number_x, number_y - number_size[1], number_size[0], number_size[1])
         text_rectangles.append(number_rect)
         
-        # Adjust length text position to avoid overlapping with spore number
-        length_end_x, length_end_y = adjust_text_position(
-            length_end_x, length_end_y, text_size_length, text_rectangles, overlay.shape)
-        length_rect = (length_end_x, length_end_y - text_size_length[1], text_size_length[0], text_size_length[1])
-        text_rectangles.append(length_rect)
-        
-        # Adjust width text position to avoid overlapping with spore number and length text
-        width_end_x, width_end_y = adjust_text_position(
-            width_end_x, width_end_y, text_size_width, text_rectangles, overlay.shape)
-        width_rect = (width_end_x, width_end_y - text_size_width[1], text_size_width[0], text_size_width[1])
-        text_rectangles.append(width_rect)
+        # Adjust consolidated measurements position to avoid overlapping with spore number
+        measurements_x, measurements_y = adjust_text_position(
+            measurements_x, measurements_y, measurements_size, text_rectangles, overlay.shape)
+        measurements_rect = (measurements_x, measurements_y - measurements_size[1], measurements_size[0], measurements_size[1])
+        text_rectangles.append(measurements_rect)
 
-        # Add background rectangles with transparency (0.5 opacity) if border_width > 0
+        # Add background rectangle for consolidated measurements with transparency if border_width > 0
         if settings['border_width'] > 0:
-            # Create mask for background areas only
+            # Create mask for background area
             background_mask = np.zeros(overlay.shape[:2], dtype=np.uint8)
 
-            # Define background rectangle areas
-            length_rect = (max(0, length_end_x - settings['border_width']),
-                           max(
-                               0, length_end_y - text_size_length[1] -
-                               settings['border_width']),
-                           min(
-                               overlay.shape[1], length_end_x +
-                               text_size_length[0] + settings['border_width']),
-                           min(overlay.shape[0],
-                               length_end_y + settings['border_width']))
+            # Define background rectangle area for consolidated measurements
+            measurements_bg_rect = (max(0, measurements_x - settings['border_width']),
+                           max(0, measurements_y - measurements_size[1] - settings['border_width']),
+                           min(overlay.shape[1], measurements_x + measurements_size[0] + settings['border_width']),
+                           min(overlay.shape[0], measurements_y + settings['border_width']))
 
-            width_rect = (max(0, width_end_x - settings['border_width']),
-                          max(
-                              0, width_end_y - text_size_width[1] -
-                              settings['border_width']),
-                          min(
-                              overlay.shape[1], width_end_x +
-                              text_size_width[0] + settings['border_width']),
-                          min(overlay.shape[0],
-                              width_end_y + settings['border_width']))
-
-            # Fill mask areas where backgrounds should be
-            cv2.rectangle(background_mask, (length_rect[0], length_rect[1]),
-                          (length_rect[2], length_rect[3]), 255, -1)
-            cv2.rectangle(background_mask, (width_rect[0], width_rect[1]),
-                          (width_rect[2], width_rect[3]), 255, -1)
+            # Fill mask area where background should be
+            cv2.rectangle(background_mask, (measurements_bg_rect[0], measurements_bg_rect[1]),
+                          (measurements_bg_rect[2], measurements_bg_rect[3]), 255, -1)
 
             # Create background overlay
             background_overlay = overlay.copy()
-            cv2.rectangle(background_overlay, (length_rect[0], length_rect[1]),
-                          (length_rect[2], length_rect[3]),
-                          settings['border_color'], -1)
-            cv2.rectangle(background_overlay, (width_rect[0], width_rect[1]),
-                          (width_rect[2], width_rect[3]),
+            cv2.rectangle(background_overlay, (measurements_bg_rect[0], measurements_bg_rect[1]),
+                          (measurements_bg_rect[2], measurements_bg_rect[3]),
                           settings['border_color'], -1)
 
-            # Apply 0.5 opacity only to background areas using the mask
+            # Apply 0.5 opacity only to background area using the mask
             mask_3d = cv2.cvtColor(background_mask, cv2.COLOR_GRAY2BGR) / 255.0
-            overlay = overlay * (1 - mask_3d * 0.5) + background_overlay * (
-                mask_3d * 0.5)
+            overlay = overlay * (1 - mask_3d * 0.5) + background_overlay * (mask_3d * 0.5)
             overlay = overlay.astype(np.uint8)
 
-        # Draw the measurement text at user-defined size (full opacity)
-        cv2.putText(overlay, length_text, (length_end_x, length_end_y),
-                    cv2.FONT_HERSHEY_SIMPLEX, font_scale,
-                    settings['font_color'], thickness)
-        cv2.putText(overlay, width_text, (width_end_x, width_end_y),
+        # Draw the consolidated measurement text at user-defined size (full opacity)
+        cv2.putText(overlay, measurements_text, (measurements_x, measurements_y),
                     cv2.FONT_HERSHEY_SIMPLEX, font_scale,
                     settings['font_color'], thickness)
 
