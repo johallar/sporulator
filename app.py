@@ -30,6 +30,8 @@ if 'selected_spores' not in st.session_state:
     st.session_state.selected_spores = set()
 if 'calibration_complete' not in st.session_state:
     st.session_state.calibration_complete = False
+if 'analysis_results' not in st.session_state:
+    st.session_state.analysis_results = []
 
 
 def main():
@@ -299,10 +301,9 @@ def main():
                                          value="#FFFFFF",
                                          help="Color of measurement text")
 
-            border_color = st.color_picker(
-                "Border Color",
-                value="#000000",
-                help="Color of text background borders")
+            border_color = st.color_picker("Text Background Color",
+                                           value="#000000",
+                                           help="Color of text background box")
 
             line_color = st.color_picker(
                 "Line Color",
@@ -311,11 +312,11 @@ def main():
 
         with col2:
             border_width = st.slider(
-                "Border Width",
+                "Text Background Size",
                 min_value=0,
                 max_value=10,
                 value=8,
-                help="Width of text background borders (0 = no border)")
+                help="Width of text background borders (0 = no background)")
 
             line_width = st.slider("Line Width",
                                    min_value=1,
@@ -325,8 +326,6 @@ def main():
 
     # Image Upload Section (consolidated)
     st.header("📁 Image Upload")
-    st.info("👆 Upload an image and click 'Analyze Spores' to begin")
-    
     uploaded_file = st.file_uploader(
         "Choose a microscopy image",
         type=['png', 'jpg', 'jpeg', 'tiff', 'tif', 'bmp'],
@@ -336,7 +335,7 @@ def main():
         # Load image
         image = Image.open(uploaded_file)
         image_array = np.array(image)
-        
+
         # Store image in session state
         st.session_state.original_image = image_array
         st.session_state.image_uploaded = True
@@ -397,12 +396,10 @@ def main():
                                 )
 
                             # Show visualization
-                            if calibration_result[
-                                    'visualization'] is not None:
+                            if calibration_result['visualization'] is not None:
                                 st.image(
                                     calibration_result['visualization'],
-                                    caption=
-                                    "Auto-Detected Calibration Objects",
+                                    caption="Auto-Detected Calibration Objects",
                                     width='stretch')
                         else:
                             st.error(
@@ -419,8 +416,7 @@ def main():
                     min_area=min_area,
                     max_area=max_area,
                     circularity_range=(circularity_min, circularity_max),
-                    aspect_ratio_range=(aspect_ratio_min,
-                                        aspect_ratio_max),
+                    aspect_ratio_range=(aspect_ratio_min, aspect_ratio_max),
                     solidity_range=(solidity_min, solidity_max),
                     convexity_range=(convexity_min, convexity_max),
                     extent_range=(extent_min, extent_max),
@@ -435,16 +431,13 @@ def main():
                 if results is not None:
                     st.session_state.analysis_results = results
                     st.session_state.analysis_complete = True
-                    st.session_state.selected_spores = set(
-                        range(len(results)))
+                    st.session_state.selected_spores = set(range(len(results)))
                     st.success(
-                        f"Analysis complete! Detected {len(results)} spores."
-                    )
+                        f"Analysis complete! Detected {len(results)} spores.")
                     st.rerun()
                 else:
                     st.error(
-                        "No spores detected. Try adjusting the parameters."
-                    )
+                        "No spores detected. Try adjusting the parameters.")
 
         with col2:
             if st.session_state.analysis_complete:
@@ -453,8 +446,9 @@ def main():
                 # Convert color picker hex values to BGR tuples for OpenCV
                 def hex_to_bgr(hex_color):
                     hex_color = hex_color.lstrip('#')
-                    return tuple(int(hex_color[i:i + 2], 16)
-                                 for i in (4, 2, 0))  # BGR order
+                    return tuple(
+                        int(hex_color[i:i + 2], 16)
+                        for i in (4, 2, 0))  # BGR order
 
                 visualization_settings = {
                     'font_size': font_size,
@@ -475,36 +469,35 @@ def main():
                 st.image(overlay_image,
                          caption="Detected Spores with Measurements",
                          width='stretch')
-
-                # Spore selection interface
-                st.subheader("✅ Spore Selection")
-                st.write(
-                    "Click checkboxes to include/exclude spores from analysis:")
-
-                # Create a grid of checkboxes for spore selection
-                results = st.session_state.analysis_results
-                cols = st.columns(5)
-
-                for i, spore in enumerate(results):
-                    col_idx = i % 5
-                    with cols[col_idx]:
-                        is_selected = st.checkbox(
-                            f"Spore {i+1}",
-                            value=i in st.session_state.selected_spores,
-                            key=f"spore_{i}")
-
-                        if is_selected and i not in st.session_state.selected_spores:
-                            st.session_state.selected_spores.add(i)
-                            st.rerun()
-                        elif not is_selected and i in st.session_state.selected_spores:
-                            st.session_state.selected_spores.remove(i)
-                            st.rerun()
             else:
                 st.subheader("Analysis Results")
                 st.write("Processed image will appear here after analysis")
     else:
-        # Show empty state when no image is uploaded
-        st.subheader("📁 Upload an Image to Begin")
+        st.info("👆 Upload an image and click 'Analyze Spores' to begin")
+
+    if st.session_state.analysis_complete and st.session_state.selected_spores:
+        # Spore selection interface
+        st.subheader("✅ Spore Selection")
+        st.write("Click checkboxes to include/exclude spores from analysis:")
+
+        # Create a grid of checkboxes for spore selection
+        results = st.session_state.analysis_results
+        cols = st.columns(5)
+
+        for i, spore in enumerate(results):
+            col_idx = i % 5
+            with cols[col_idx]:
+                is_selected = st.checkbox(f"Spore {i+1}",
+                                          value=i
+                                          in st.session_state.selected_spores,
+                                          key=f"spore_{i}")
+
+                if is_selected and i not in st.session_state.selected_spores:
+                    st.session_state.selected_spores.add(i)
+                    st.rerun()
+                elif not is_selected and i in st.session_state.selected_spores:
+                    st.session_state.selected_spores.remove(i)
+                    st.rerun()
 
     # Statistics and results section
     if st.session_state.analysis_complete and st.session_state.selected_spores:
@@ -540,6 +533,34 @@ def main():
         # Data table
         st.subheader("📋 Detailed Measurements")
         st.dataframe(df_results, width='stretch')
+
+        # Display statistics in columns
+        col1, col2, col3, col4, col5 = st.columns(5)
+
+        with col1:
+            st.metric("Total Spores", len(selected_results))
+            st.metric("Mean Length (μm)", f"{stats['length_mean']:.2f}")
+            st.metric("Mean Width (μm)", f"{stats['width_mean']:.2f}")
+
+        with col2:
+            st.metric("Std Dev Length", f"{stats['length_std']:.2f}")
+            st.metric("Std Dev Width", f"{stats['width_std']:.2f}")
+            st.metric("Mean Aspect Ratio", f"{stats['aspect_ratio_mean']:.2f}")
+
+        with col3:
+            st.metric("Min Length (μm)", f"{stats['length_min']:.2f}")
+            st.metric("Max Length (μm)", f"{stats['length_max']:.2f}")
+            st.metric("Mean Area (μm²)", f"{stats['area_mean']:.2f}")
+
+        with col4:
+            st.metric("Min Width (μm)", f"{stats['width_min']:.2f}")
+            st.metric("Max Width (μm)", f"{stats['width_max']:.2f}")
+            st.metric("Mean Circularity", f"{stats['circularity_mean']:.3f}")
+
+        with col5:
+            st.metric("Mean Solidity", f"{stats['solidity_mean']:.3f}")
+            st.metric("Mean Convexity", f"{stats['convexity_mean']:.3f}")
+            st.metric("Mean Extent", f"{stats['extent_mean']:.3f}")
 
         # Export functionality
         st.subheader("💾 Export Results")
@@ -581,34 +602,6 @@ def main():
                     file_name=
                     f"spore_overlay_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.png",
                     mime="image/png")
-
-        # Display statistics in columns
-        col1, col2, col3, col4, col5 = st.columns(5)
-
-        with col1:
-            st.metric("Total Spores", len(selected_results))
-            st.metric("Mean Length (μm)", f"{stats['length_mean']:.2f}")
-            st.metric("Mean Width (μm)", f"{stats['width_mean']:.2f}")
-
-        with col2:
-            st.metric("Std Dev Length", f"{stats['length_std']:.2f}")
-            st.metric("Std Dev Width", f"{stats['width_std']:.2f}")
-            st.metric("Mean Aspect Ratio", f"{stats['aspect_ratio_mean']:.2f}")
-
-        with col3:
-            st.metric("Min Length (μm)", f"{stats['length_min']:.2f}")
-            st.metric("Max Length (μm)", f"{stats['length_max']:.2f}")
-            st.metric("Mean Area (μm²)", f"{stats['area_mean']:.2f}")
-
-        with col4:
-            st.metric("Min Width (μm)", f"{stats['width_min']:.2f}")
-            st.metric("Max Width (μm)", f"{stats['width_max']:.2f}")
-            st.metric("Mean Circularity", f"{stats['circularity_mean']:.3f}")
-
-        with col5:
-            st.metric("Mean Solidity", f"{stats['solidity_mean']:.3f}")
-            st.metric("Mean Convexity", f"{stats['convexity_mean']:.3f}")
-            st.metric("Mean Extent", f"{stats['extent_mean']:.3f}")
 
         # Histograms
         st.subheader("📊 Distribution Plots")

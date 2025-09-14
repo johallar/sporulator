@@ -129,7 +129,7 @@ def create_overlay_image(original_image,
         'font_color': (255, 255, 255),  # White
         'border_color': (0, 0, 0),  # Black
         'border_width': 8,
-        'line_color': (0, 255, 255),  # Yellow
+        'line_color': (255, 255, 0),  # Cyan (matches #00FFFF)
         'line_width': 2
     }
 
