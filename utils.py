@@ -177,7 +177,8 @@ def create_overlay_image(original_image,
                          spore_results,
                          selected_spores,
                          pixel_scale,
-                         vis_settings=None):
+                         vis_settings=None,
+                         include_stats=True):
     """Create an overlay image showing detected spores with measurement lines"""
     # Default visualization settings
     default_settings = {
@@ -365,32 +366,73 @@ def create_overlay_image(original_image,
                         settings['font_color'], thickness)
             current_y += line_heights[j] + 10  # 10px spacing between lines
 
-    # Add units legend in top-right corner
-    legend_text = "Units: micrometers (μm)"
-    legend_font_scale = 0.7
+    # Add enhanced legend with statistics in top-right corner
+    if include_stats and selected_spores:
+        # Calculate statistics for selected spores
+        selected_results = [spore_results[i] for i in selected_spores if i < len(spore_results)]
+        
+        if selected_results:
+            lengths = [spore['length_um'] for spore in selected_results]
+            widths = [spore['width_um'] for spore in selected_results]
+            
+            # Calculate Q value (length/width ratio)
+            q_values = [l/w for l, w in zip(lengths, widths)]
+            mean_q = np.mean(q_values)
+            
+            # Create legend text lines with increased font size
+            legend_lines = [
+                "Units: micrometers (um)",
+                f"Selected: {len(selected_results)} spores",
+                f"Length: {np.mean(lengths):.1f} ± {np.std(lengths):.1f} um",
+                f"Width: {np.mean(widths):.1f} ± {np.std(widths):.1f} um", 
+                f"Q value: {mean_q:.2f}"
+            ]
+        else:
+            legend_lines = ["Units: micrometers (um)", "No spores selected"]
+    else:
+        legend_lines = ["Units: micrometers (um)"]
+
+    # Increased font size
+    legend_font_scale = 0.9
     legend_thickness = 2
-    legend_size = cv2.getTextSize(legend_text, cv2.FONT_HERSHEY_SIMPLEX,
-                                  legend_font_scale, legend_thickness)[0]
+    line_spacing = 25
+    
+    # Calculate maximum text width and total height
+    max_width = 0
+    total_height = 0
+    line_heights = []
+    
+    for line in legend_lines:
+        text_size = cv2.getTextSize(line, cv2.FONT_HERSHEY_SIMPLEX, 
+                                   legend_font_scale, legend_thickness)[0]
+        max_width = max(max_width, text_size[0])
+        line_heights.append(text_size[1])
+        total_height += text_size[1] + line_spacing
+    
+    total_height -= line_spacing  # Remove last line spacing
 
     # Position legend in top-right corner with full bounds checking
-    legend_x = max(
-        10, min(overlay.shape[1] - legend_size[0] - 20, overlay.shape[1] - 30))
-    legend_y = max(legend_size[1] + 10, min(30, overlay.shape[0] - 20))
+    legend_x = max(15, min(overlay.shape[1] - max_width - 30, overlay.shape[1] - 40))
+    legend_y = max(line_heights[0] + 15, min(40, overlay.shape[0] - total_height - 30))
 
-    # Create legend background with 0.5 opacity
+    # Create larger legend background with 0.5 opacity
     legend_background = overlay.copy()
     cv2.rectangle(legend_background,
-                  (legend_x - 10, legend_y - legend_size[1] - 10),
-                  (legend_x + legend_size[0] + 10, legend_y + 10), (0, 0, 0),
-                  -1)
+                  (legend_x - 15, legend_y - line_heights[0] - 15),
+                  (legend_x + max_width + 15, legend_y + total_height - line_heights[0] + 15), 
+                  (0, 0, 0), -1)
 
     # Blend legend background at 0.5 opacity
     cv2.addWeighted(overlay, 0.5, legend_background, 0.5, 0, overlay)
 
-    # Draw legend text at full opacity
-    cv2.putText(overlay, legend_text, (legend_x, legend_y),
-                cv2.FONT_HERSHEY_SIMPLEX, legend_font_scale, (255, 255, 255),
-                legend_thickness)
+    # Draw legend text lines at full opacity
+    current_y = legend_y
+    for i, line in enumerate(legend_lines):
+        cv2.putText(overlay, line, (legend_x, current_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, legend_font_scale, (255, 255, 255),
+                    legend_thickness)
+        if i < len(legend_lines) - 1:  # Don't add spacing after last line
+            current_y += line_heights[i] + line_spacing
 
     # Convert back to RGB for Streamlit display
     overlay = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
