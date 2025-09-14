@@ -110,18 +110,37 @@ def create_overlay_image(original_image, spore_results, selected_spores, pixel_s
                    (lines['centroid'][0] + 10, lines['centroid'][1] - 10),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, text_color, 1)
         
-        # Add measurement text
-        length_text = f"L:{spore['length_um']:.1f}μm"
-        width_text = f"W:{spore['width_um']:.1f}μm"
+        # Add measurement text next to the measurement lines
+        length_text = f"{spore['length_um']:.1f}μm"
+        width_text = f"{spore['width_um']:.1f}μm"
         
-        # Position text near the spore
-        text_x = lines['centroid'][0] + 15
-        text_y = lines['centroid'][1] + 5
+        # Position length text near the middle of the length line
+        length_mid_x = (lines['length_line'][0][0] + lines['length_line'][1][0]) // 2
+        length_mid_y = (lines['length_line'][0][1] + lines['length_line'][1][1]) // 2
         
-        cv2.putText(overlay, length_text, (text_x, text_y),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, text_color, 1)
-        cv2.putText(overlay, width_text, (text_x, text_y + 15),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, text_color, 1)
+        # Position width text near the middle of the width line  
+        width_mid_x = (lines['width_line'][0][0] + lines['width_line'][1][0]) // 2
+        width_mid_y = (lines['width_line'][0][1] + lines['width_line'][1][1]) // 2
+        
+        # Offset text slightly to avoid overlapping with lines
+        length_text_x = length_mid_x + 8
+        length_text_y = length_mid_y - 5
+        
+        width_text_x = width_mid_x + 8  
+        width_text_y = width_mid_y - 5
+        
+        # Add small background rectangles for better text visibility
+        cv2.rectangle(overlay, (length_text_x-2, length_text_y-12), 
+                     (length_text_x + len(length_text)*8, length_text_y+3), 
+                     (0, 0, 0), -1)
+        cv2.rectangle(overlay, (width_text_x-2, width_text_y-12), 
+                     (width_text_x + len(width_text)*8, width_text_y+3), 
+                     (0, 0, 0), -1)
+        
+        cv2.putText(overlay, length_text, (length_text_x, length_text_y),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+        cv2.putText(overlay, width_text, (width_text_x, width_text_y),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
     
     return overlay
 

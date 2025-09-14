@@ -164,9 +164,25 @@ class SporeAnalyzer:
         try:
             ellipse = cv2.fitEllipse(contour)
             center, axes, angle = ellipse
-            major_axis = max(axes)
-            minor_axis = min(axes)
-            return major_axis, minor_axis, angle
+            
+            # OpenCV fitEllipse returns (width, height) where angle corresponds to the width direction
+            # We need to ensure the angle corresponds to the major axis (length)
+            width, height = axes
+            
+            if width >= height:
+                # Width is major axis (length)
+                major_axis = width
+                minor_axis = height
+                # Angle already corresponds to major axis
+                major_angle = angle
+            else:
+                # Height is major axis (length)
+                major_axis = height
+                minor_axis = width
+                # Adjust angle to correspond to major axis (add 90 degrees)
+                major_angle = angle + 90
+                
+            return major_axis, minor_axis, major_angle
         except:
             return None, None, None
     
