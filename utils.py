@@ -375,22 +375,35 @@ def create_overlay_image(original_image,
             lengths = [spore['length_um'] for spore in selected_results]
             widths = [spore['width_um'] for spore in selected_results]
             
-            # Calculate Q value (length/width ratio)
+            # Calculate Qm value (length/width ratio)
             q_values = [l/w for l, w in zip(lengths, widths)]
             mean_q = np.mean(q_values)
+            std_q = np.std(q_values)
             
-            # Create legend text lines with increased font size
+            # Calculate mycological summary format ranges
+            # Length ranges: (min–) 10th percentile–90th percentile (–max)
+            length_min, length_max = min(lengths), max(lengths)
+            length_10th = np.percentile(lengths, 10)
+            length_90th = np.percentile(lengths, 90)
+            
+            # Width ranges: (min–) 10th percentile–90th percentile (–max)  
+            width_min, width_max = min(widths), max(widths)
+            width_10th = np.percentile(widths, 10)
+            width_90th = np.percentile(widths, 90)
+            
+            # Create mycological format dimension string
+            dimension_str = f"({length_min:.1f}–) {length_10th:.1f}–{length_90th:.1f} (–{length_max:.1f}) × ({width_min:.1f}–) {width_10th:.1f}–{width_90th:.1f} (–{width_max:.1f}) µm"
+            
+            # Create legend text lines with mycological format
             legend_lines = [
-                "Units: micrometers (um)",
-                f"Selected: {len(selected_results)} spores",
-                f"Length: {np.mean(lengths):.1f} ± {np.std(lengths):.1f} um",
-                f"Width: {np.mean(widths):.1f} ± {np.std(widths):.1f} um", 
-                f"Q value: {mean_q:.2f}"
+                f"n = {len(selected_results)} spores",
+                dimension_str,
+                f"Qm = {mean_q:.1f} ± {std_q:.1f}"
             ]
         else:
-            legend_lines = ["Units: micrometers (um)", "No spores selected"]
+            legend_lines = ["No spores selected"]
     else:
-        legend_lines = ["Units: micrometers (um)"]
+        legend_lines = ["Units: micrometers (µm)"]
 
     # Increased font size
     legend_font_scale = 0.9
