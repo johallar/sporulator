@@ -61,6 +61,59 @@ def calculate_statistics(spore_results):
     
     return stats
 
+def generate_mycological_summary(selected_results):
+    """Generate mycological summary in the standard format"""
+    if not selected_results:
+        return "No spores selected for analysis."
+    
+    lengths = [spore['length_um'] for spore in selected_results]
+    widths = [spore['width_um'] for spore in selected_results]
+    aspect_ratios = [spore['aspect_ratio'] for spore in selected_results]
+    
+    # Sort to get quartiles and extremes
+    lengths_sorted = sorted(lengths)
+    widths_sorted = sorted(widths)
+    aspect_ratios_sorted = sorted(aspect_ratios)
+    
+    n = len(lengths_sorted)
+    
+    # Calculate quartiles (25th and 75th percentile) for the main range
+    q1_idx = int(n * 0.25)
+    q3_idx = int(n * 0.75)
+    
+    # Length statistics
+    length_min = min(lengths)
+    length_q1 = lengths_sorted[q1_idx]
+    length_q3 = lengths_sorted[q3_idx]
+    length_max = max(lengths)
+    
+    # Width statistics  
+    width_min = min(widths)
+    width_q1 = widths_sorted[q1_idx]
+    width_q3 = widths_sorted[q3_idx]
+    width_max = max(widths)
+    
+    # Aspect ratio statistics
+    aspect_min = min(aspect_ratios)
+    aspect_q1 = aspect_ratios_sorted[q1_idx]
+    aspect_q3 = aspect_ratios_sorted[q3_idx]
+    aspect_max = max(aspect_ratios)
+    aspect_mean = sum(aspect_ratios) / len(aspect_ratios)
+    aspect_std = (sum((x - aspect_mean) ** 2 for x in aspect_ratios) / len(aspect_ratios)) ** 0.5
+    
+    # Format the mycological summary
+    summary = f"**Spore dimensions:**\n\n"
+    summary += f"({length_min:.1f}–) {length_q1:.1f}–{length_q3:.1f} (–{length_max:.1f}) × "
+    summary += f"({width_min:.1f}–) {width_q1:.1f}–{width_q3:.1f} (–{width_max:.1f}) µm\n\n"
+    summary += f"**Q value (length/width ratio):**\n\n"
+    summary += f"Q = ({aspect_min:.1f}–) {aspect_q1:.1f}–{aspect_q3:.1f} (–{aspect_max:.1f}), "
+    summary += f"Qm = {aspect_mean:.1f} ± {aspect_std:.1f}\n\n"
+    summary += f"**Interpretation:**\n\n"
+    summary += f"Most spores are {length_q1:.1f}–{length_q3:.1f} by {width_q1:.1f}–{width_q3:.1f} µm, "
+    summary += f"with rare extremes down to {length_min:.1f} × {width_min:.1f} and up to {length_max:.1f} × {width_max:.1f} µm."
+    
+    return summary
+
 def create_overlay_image(original_image, spore_results, selected_spores, pixel_scale, vis_settings=None):
     """Create an overlay image showing detected spores with measurement lines"""
     # Default visualization settings
@@ -95,15 +148,15 @@ def create_overlay_image(original_image, spore_results, selected_spores, pixel_s
     # Draw each spore
     for i, spore in enumerate(spore_results):
         if i in selected_spores:
-            # Selected spores - green
-            contour_color = (0, 255, 0)  # Green
-            text_color = (0, 255, 0)     # Green
+            # Selected spores - use line color for both contours and measurement lines
+            contour_color = settings['line_color']
+            text_color = (0, 255, 0)     # Green for spore numbers
         else:
-            # Unselected spores - red
-            contour_color = (255, 0, 0)  # Red
-            text_color = (255, 0, 0)     # Red
+            # Unselected spores - use dimmed line color
+            contour_color = tuple(int(c * 0.6) for c in settings['line_color'])  # Dimmed version
+            text_color = (255, 0, 0)     # Red for spore numbers
         
-        # Draw contour with 0.5 opacity  
+        # Draw contour with 0.5 opacity using the line color
         contour_temp = overlay.copy()
         cv2.drawContours(contour_temp, [spore['contour']], -1, contour_color, 2)
         cv2.addWeighted(overlay, 0.5, contour_temp, 0.5, 0, overlay)

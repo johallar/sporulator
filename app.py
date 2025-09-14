@@ -8,7 +8,7 @@ from PIL import Image
 import io
 import base64
 from spore_analyzer import SporeAnalyzer
-from utils import calculate_statistics, create_overlay_image, export_results
+from utils import calculate_statistics, create_overlay_image, export_results, generate_mycological_summary
 from calibration import StageCalibration
 
 # Configure page
@@ -178,80 +178,79 @@ def main():
             help="Exclude spores touching the image edges (incomplete spores)"
         )
         
-        # Enhanced shape filters
-        st.subheader("Advanced Shape Filters")
-        
-        aspect_ratio_min = st.slider(
-            "Minimum Aspect Ratio",
-            min_value=1.0,
-            max_value=10.0,
-            value=1.0,
-            step=0.1,
-            help="Minimum length/width ratio (1.0 = square, higher = more elongated)"
-        )
-        
-        aspect_ratio_max = st.slider(
-            "Maximum Aspect Ratio",
-            min_value=1.0,
-            max_value=10.0,
-            value=5.0,
-            step=0.1,
-            help="Maximum length/width ratio"
-        )
-        
-        solidity_min = st.slider(
-            "Minimum Solidity",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.5,
-            step=0.01,
-            help="Minimum solidity (spore area / convex hull area). Higher = less concave"
-        )
-        
-        solidity_max = st.slider(
-            "Maximum Solidity",
-            min_value=0.0,
-            max_value=1.0,
-            value=1.0,
-            step=0.01,
-            help="Maximum solidity"
-        )
-        
-        convexity_min = st.slider(
-            "Minimum Convexity",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.7,
-            step=0.01,
-            help="Minimum convexity (convex hull perimeter / spore perimeter). Higher = smoother outline"
-        )
-        
-        convexity_max = st.slider(
-            "Maximum Convexity",
-            min_value=0.0,
-            max_value=1.0,
-            value=1.0,
-            step=0.01,
-            help="Maximum convexity"
-        )
-        
-        extent_min = st.slider(
-            "Minimum Extent",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.3,
-            step=0.01,
-            help="Minimum extent (spore area / bounding rectangle area). Higher = fills bounding box better"
-        )
-        
-        extent_max = st.slider(
-            "Maximum Extent",
-            min_value=0.0,
-            max_value=1.0,
-            value=1.0,
-            step=0.01,
-            help="Maximum extent"
-        )
+        # Enhanced shape filters - collapsible and collapsed by default
+        with st.expander("Advanced Shape Filters", expanded=False):
+            aspect_ratio_min = st.slider(
+                "Minimum Aspect Ratio",
+                min_value=1.0,
+                max_value=10.0,
+                value=1.0,
+                step=0.1,
+                help="Minimum length/width ratio (1.0 = square, higher = more elongated)"
+            )
+            
+            aspect_ratio_max = st.slider(
+                "Maximum Aspect Ratio",
+                min_value=1.0,
+                max_value=10.0,
+                value=5.0,
+                step=0.1,
+                help="Maximum length/width ratio"
+            )
+            
+            solidity_min = st.slider(
+                "Minimum Solidity",
+                min_value=0.0,
+                max_value=1.0,
+                value=0.5,
+                step=0.01,
+                help="Minimum solidity (spore area / convex hull area). Higher = less concave"
+            )
+            
+            solidity_max = st.slider(
+                "Maximum Solidity",
+                min_value=0.0,
+                max_value=1.0,
+                value=1.0,
+                step=0.01,
+                help="Maximum solidity"
+            )
+            
+            convexity_min = st.slider(
+                "Minimum Convexity",
+                min_value=0.0,
+                max_value=1.0,
+                value=0.7,
+                step=0.01,
+                help="Minimum convexity (convex hull perimeter / spore perimeter). Higher = smoother outline"
+            )
+            
+            convexity_max = st.slider(
+                "Maximum Convexity",
+                min_value=0.0,
+                max_value=1.0,
+                value=1.0,
+                step=0.01,
+                help="Maximum convexity"
+            )
+            
+            extent_min = st.slider(
+                "Minimum Extent",
+                min_value=0.0,
+                max_value=1.0,
+                value=0.3,
+                step=0.01,
+                help="Minimum extent (spore area / bounding rectangle area). Higher = fills bounding box better"
+            )
+            
+            extent_max = st.slider(
+                "Maximum Extent",
+                min_value=0.0,
+                max_value=1.0,
+                value=1.0,
+                step=0.01,
+                help="Maximum extent"
+            )
         
         # Image processing parameters
         st.subheader("Image Processing")
@@ -309,8 +308,8 @@ def main():
             
             line_color = st.color_picker(
                 "Line Color",
-                value="#FFFF00", 
-                help="Color of measurement lines"
+                value="#00FFFF", 
+                help="Color of measurement lines and spore borders"
             )
         
         with col2:
@@ -499,6 +498,11 @@ def main():
         # Calculate statistics
         stats = calculate_statistics(selected_results)
         
+        # Summary section
+        st.subheader("📄 Summary")
+        mycological_summary = generate_mycological_summary(selected_results)
+        st.markdown(mycological_summary)
+        
         # Display statistics in columns
         col1, col2, col3, col4, col5 = st.columns(5)
         
@@ -637,7 +641,7 @@ def main():
         
         # Data table
         st.subheader("📋 Detailed Measurements")
-        st.dataframe(df_results, use_container_width=True)
+        st.dataframe(df_results, width='stretch')
         
         # Export functionality
         st.subheader("💾 Export Results")
