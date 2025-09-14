@@ -270,7 +270,7 @@ def create_overlay_image(original_image,
             line_heights.append(line_height)
         
         # Calculate total text box size with proper baseline accounting
-        line_spacing = 5
+        line_spacing = 10  # Increased spacing for better readability
         total_height = sum(line_heights) + (len(text_lines) - 1) * line_spacing
         text_box_size = (max_width, total_height)
         
@@ -363,7 +363,7 @@ def create_overlay_image(original_image,
             cv2.putText(overlay, line, (text_x, current_y),
                         cv2.FONT_HERSHEY_SIMPLEX, font_scale,
                         settings['font_color'], thickness)
-            current_y += line_heights[j] + 5  # 5px spacing between lines
+            current_y += line_heights[j] + 10  # 10px spacing between lines
 
     # Add units legend in top-right corner
     legend_text = "Units: micrometers (μm)"
