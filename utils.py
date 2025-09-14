@@ -182,10 +182,44 @@ def create_overlay_image(original_image,
         # Draw centroid
         cv2.circle(overlay, lines['centroid'], 3, text_color, -1)
 
-        # Add spore number
-        cv2.putText(overlay, str(i + 1),
-                    (lines['centroid'][0] + 10, lines['centroid'][1] - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, text_color, 1)
+        # Add spore number with same styling as measurements
+        spore_number = str(i + 1)
+        font_scale = settings['font_size']
+        thickness = max(1, int(font_scale * 2))
+        
+        # Position spore number near centroid but offset to avoid overlap
+        number_x = lines['centroid'][0] + 15
+        number_y = lines['centroid'][1] + 5
+        
+        # Calculate text size for background rectangle
+        number_size = cv2.getTextSize(spore_number, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)[0]
+        
+        # Add background rectangle with transparency if border_width > 0
+        if settings['border_width'] > 0:
+            # Create mask for this number background
+            number_mask = np.zeros(overlay.shape[:2], dtype=np.uint8)
+            
+            # Define background rectangle area
+            number_rect = (max(0, number_x - settings['border_width']),
+                          max(0, number_y - number_size[1] - settings['border_width']),
+                          min(overlay.shape[1], number_x + number_size[0] + settings['border_width']),
+                          min(overlay.shape[0], number_y + settings['border_width']))
+            
+            cv2.rectangle(number_mask, (number_rect[0], number_rect[1]), (number_rect[2], number_rect[3]), 255, -1)
+            
+            # Create background overlay
+            number_background = overlay.copy()
+            cv2.rectangle(number_background, (number_rect[0], number_rect[1]), (number_rect[2], number_rect[3]), 
+                         settings['border_color'], -1)
+            
+            # Apply 0.5 opacity blend only to the rectangle area
+            mask_3d = cv2.cvtColor(number_mask, cv2.COLOR_GRAY2BGR) / 255.0
+            overlay = (overlay * (1 - mask_3d * 0.5) + number_background * mask_3d * 0.5)
+            overlay = overlay.astype(np.uint8)
+        
+        # Draw spore number with same settings as measurement text
+        cv2.putText(overlay, spore_number, (number_x, number_y),
+                   cv2.FONT_HERSHEY_SIMPLEX, font_scale, settings['font_color'], thickness)
 
         # Add measurement text with L/W prefixes, no units
         length_text = f"L: {spore['length_um']:.2f}"
