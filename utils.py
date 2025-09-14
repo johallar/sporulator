@@ -202,13 +202,14 @@ def create_overlay_image(original_image,
     if overlay.dtype != np.uint8:
         overlay = (overlay * 255).astype(np.uint8)
 
-    # No need for a separate border overlay - we'll use temporary overlays per spore
-
     from spore_analyzer import SporeAnalyzer
     analyzer = SporeAnalyzer()
     analyzer.pixel_scale = pixel_scale
 
-    # Draw each spore
+    # Global text rectangles for collision detection across all spores
+    global_text_rectangles = []
+
+    # First pass: Draw spores and measurement lines
     for i, spore in enumerate(spore_results):
         if i in selected_spores:
             # Selected spores - use line color for both contours and measurement lines
@@ -238,111 +239,112 @@ def create_overlay_image(original_image,
         # Draw centroid
         cv2.circle(overlay, lines['centroid'], 3, text_color, -1)
 
-        # Add spore number with same styling as measurements
+    # Second pass: Add multi-line text boxes with global collision detection
+    for i, spore in enumerate(spore_results):
+        if i in selected_spores:
+            text_color = (0, 255, 0)  # Green for selected spores
+        else:
+            text_color = (255, 0, 0)  # Red for unselected spores
+
+        # Get measurement lines for centroid
+        lines = analyzer.get_measurement_lines(spore)
+        centroid = lines['centroid']
+
+        # Create multi-line text
         spore_number = str(i + 1)
+        line1 = f"#{spore_number}"
+        line2 = f"L: {spore['length_um']:.2f}"
+        line3 = f"W: {spore['width_um']:.2f}"
+        text_lines = [line1, line2, line3]
+
         font_scale = settings['font_size']
         thickness = max(1, int(font_scale * 2))
         
-        # Calculate text size first
-        number_size = cv2.getTextSize(spore_number, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)[0]
+        # Calculate text box dimensions
+        line_heights = []
+        max_width = 0
+        for line in text_lines:
+            line_size = cv2.getTextSize(line, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
+            line_width, line_height = line_size[0]
+            max_width = max(max_width, line_width)
+            line_heights.append(line_height)
         
-        # Calculate spore bounding box to position text outside spore area
+        # Calculate total text box size
+        total_height = sum(line_heights) + (len(text_lines) - 1) * 5  # 5px spacing between lines
+        text_box_size = (max_width, total_height)
+
+        # Initial positioning - try to place text box away from spore
         contour = spore['contour']
         x, y, w, h = cv2.boundingRect(contour)
         
-        # Position spore number outside the spore's bounding box (top-left corner)
-        number_x = x - number_size[0] - 10  # Left of spore with padding
-        number_y = y - 5  # Above spore with padding
+        # Try different positions around the spore
+        candidate_positions = [
+            (x + w + 20, y),  # Right of spore
+            (x - max_width - 20, y),  # Left of spore
+            (x, y - total_height - 20),  # Above spore
+            (x, y + h + 20),  # Below spore
+            (x + w + 20, y + h // 2),  # Right-center
+            (x - max_width - 20, y + h // 2),  # Left-center
+        ]
         
-        # Ensure number stays within image bounds
-        if number_x < 0:  # If too far left, place to the right
-            number_x = x + w + 10
-        if number_y < number_size[1]:  # If too high, place below  
-            number_y = y + h + number_size[1] + 10
+        # Find best position with global collision detection
+        text_x, text_y = None, None
+        for candidate_x, candidate_y in candidate_positions:
+            # Ensure position is within image bounds
+            candidate_x = max(0, min(overlay.shape[1] - max_width, candidate_x))
+            candidate_y = max(total_height, min(overlay.shape[0], candidate_y))
             
-        # Store text rectangles for collision detection
-        text_rectangles = []
+            # Check if this position overlaps with any existing text rectangles
+            candidate_rect = (candidate_x, candidate_y - total_height, max_width, total_height)
+            overlap = False
+            
+            for existing_rect in global_text_rectangles:
+                if rectangles_overlap(candidate_rect, existing_rect):
+                    overlap = True
+                    break
+                    
+            if not overlap:
+                text_x, text_y = candidate_x, candidate_y
+                break
         
+        # If no non-overlapping position found, use adjust_text_position
+        if text_x is None or text_y is None:
+            text_x = x + w + 20
+            text_y = y + total_height
+            text_x, text_y = adjust_text_position(
+                text_x, text_y, text_box_size, global_text_rectangles, overlay.shape)
+
+        # Store this text box rectangle for future collision detection
+        text_rect = (text_x, text_y - total_height, max_width, total_height)
+        global_text_rectangles.append(text_rect)
+
+        # Draw connecting line from text box to centroid
+        # Connect from the closest edge of text box to centroid
+        text_center_x = text_x + max_width // 2
+        text_center_y = text_y - total_height // 2
+        
+        cv2.line(overlay, (text_center_x, text_center_y), centroid,
+                 settings['line_color'], 1)
+
         # Add background rectangle with transparency if border_width > 0
-        if settings['border_width'] > 0:
-            # Create mask for this number background
-            number_mask = np.zeros(overlay.shape[:2], dtype=np.uint8)
-            
-            # Define background rectangle area
-            number_rect = (max(0, number_x - settings['border_width']),
-                          max(0, number_y - number_size[1] - settings['border_width']),
-                          min(overlay.shape[1], number_x + number_size[0] + settings['border_width']),
-                          min(overlay.shape[0], number_y + settings['border_width']))
-            
-            cv2.rectangle(number_mask, (number_rect[0], number_rect[1]), (number_rect[2], number_rect[3]), 255, -1)
-            
-            # Create background overlay
-            number_background = overlay.copy()
-            cv2.rectangle(number_background, (number_rect[0], number_rect[1]), (number_rect[2], number_rect[3]), 
-                         settings['border_color'], -1)
-            
-            # Apply 0.5 opacity blend only to the rectangle area
-            mask_3d = cv2.cvtColor(number_mask, cv2.COLOR_GRAY2BGR) / 255.0
-            overlay = (overlay * (1 - mask_3d * 0.5) + number_background * mask_3d * 0.5)
-            overlay = overlay.astype(np.uint8)
-        
-        # Draw spore number with same settings as measurement text
-        cv2.putText(overlay, spore_number, (number_x, number_y),
-                   cv2.FONT_HERSHEY_SIMPLEX, font_scale, settings['font_color'], thickness)
-
-        # Add consolidated measurement text with L/W in one box
-        measurements_text = f"L: {spore['length_um']:.2f}, W: {spore['width_um']:.2f}"
-
-        # Calculate text size for the consolidated measurement text
-        font_scale = settings['font_size']
-        thickness = max(1, int(font_scale * 2))
-        measurements_size = cv2.getTextSize(measurements_text,
-                                           cv2.FONT_HERSHEY_SIMPLEX,
-                                           font_scale, thickness)[0]
-
-        # Smart positioning for consolidated measurements - place near length line end
-        length_line_end = lines['length_line'][1]
-        
-        # Check if the line end is close to spore boundary and offset accordingly
-        measurements_offset_x = 15 if length_line_end[0] > lines['centroid'][0] else -measurements_size[0] - 15
-        measurements_offset_y = -10 if length_line_end[1] < lines['centroid'][1] else 25
-        
-        measurements_x = length_line_end[0] + measurements_offset_x
-        measurements_y = length_line_end[1] + measurements_offset_y
-        
-        # Ensure text stays within image bounds
-        measurements_x = max(0, min(overlay.shape[1] - measurements_size[0], measurements_x))
-        measurements_y = max(measurements_size[1], min(overlay.shape[0] - 5, measurements_y))
-        
-        # Add spore number rectangle to avoid overlaps
-        number_rect = (number_x, number_y - number_size[1], number_size[0], number_size[1])
-        text_rectangles.append(number_rect)
-        
-        # Adjust consolidated measurements position to avoid overlapping with spore number
-        measurements_x, measurements_y = adjust_text_position(
-            measurements_x, measurements_y, measurements_size, text_rectangles, overlay.shape)
-        measurements_rect = (measurements_x, measurements_y - measurements_size[1], measurements_size[0], measurements_size[1])
-        text_rectangles.append(measurements_rect)
-
-        # Add background rectangle for consolidated measurements with transparency if border_width > 0
         if settings['border_width'] > 0:
             # Create mask for background area
             background_mask = np.zeros(overlay.shape[:2], dtype=np.uint8)
 
-            # Define background rectangle area for consolidated measurements
-            measurements_bg_rect = (max(0, measurements_x - settings['border_width']),
-                           max(0, measurements_y - measurements_size[1] - settings['border_width']),
-                           min(overlay.shape[1], measurements_x + measurements_size[0] + settings['border_width']),
-                           min(overlay.shape[0], measurements_y + settings['border_width']))
+            # Define background rectangle area
+            bg_rect = (max(0, text_x - settings['border_width']),
+                      max(0, text_y - total_height - settings['border_width']),
+                      min(overlay.shape[1], text_x + max_width + settings['border_width']),
+                      min(overlay.shape[0], text_y + settings['border_width']))
 
             # Fill mask area where background should be
-            cv2.rectangle(background_mask, (measurements_bg_rect[0], measurements_bg_rect[1]),
-                          (measurements_bg_rect[2], measurements_bg_rect[3]), 255, -1)
+            cv2.rectangle(background_mask, (bg_rect[0], bg_rect[1]),
+                          (bg_rect[2], bg_rect[3]), 255, -1)
 
             # Create background overlay
             background_overlay = overlay.copy()
-            cv2.rectangle(background_overlay, (measurements_bg_rect[0], measurements_bg_rect[1]),
-                          (measurements_bg_rect[2], measurements_bg_rect[3]),
+            cv2.rectangle(background_overlay, (bg_rect[0], bg_rect[1]),
+                          (bg_rect[2], bg_rect[3]),
                           settings['border_color'], -1)
 
             # Apply 0.5 opacity only to background area using the mask
@@ -350,10 +352,13 @@ def create_overlay_image(original_image,
             overlay = overlay * (1 - mask_3d * 0.5) + background_overlay * (mask_3d * 0.5)
             overlay = overlay.astype(np.uint8)
 
-        # Draw the consolidated measurement text at user-defined size (full opacity)
-        cv2.putText(overlay, measurements_text, (measurements_x, measurements_y),
-                    cv2.FONT_HERSHEY_SIMPLEX, font_scale,
-                    settings['font_color'], thickness)
+        # Draw multi-line text
+        current_y = text_y
+        for j, line in enumerate(text_lines):
+            cv2.putText(overlay, line, (text_x, current_y),
+                        cv2.FONT_HERSHEY_SIMPLEX, font_scale,
+                        settings['font_color'], thickness)
+            current_y += line_heights[j] + 5  # 5px spacing between lines
 
     # Add units legend in top-right corner
     legend_text = "Units: micrometers (μm)"
