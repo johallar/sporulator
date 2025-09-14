@@ -34,6 +34,8 @@ if 'calibration_complete' not in st.session_state:
     st.session_state.calibration_complete = False
 if 'analysis_results' not in st.session_state:
     st.session_state.analysis_results = []
+if 'pixel_scale' not in st.session_state:
+    st.session_state.pixel_scale = 1.0  # Default value
 
 
 def fetch_inaturalist_photos(observation_id):
@@ -862,67 +864,9 @@ def main():
             else:
                 st.error("No spores detected. Try adjusting the parameters.")
 
+        # Reserve space for right column but populate it later after spore selection
         with col2:
-            if st.session_state.analysis_complete:
-                st.subheader("Detection Results")
-
-                # Convert color picker hex values to BGR tuples for OpenCV
-                def hex_to_bgr(hex_color):
-                    hex_color = hex_color.lstrip('#')
-                    # Extract RGB values and convert to BGR order
-                    r = int(hex_color[0:2], 16)
-                    g = int(hex_color[2:4], 16)
-                    b = int(hex_color[4:6], 16)
-                    return (b, g, r)  # BGR order for OpenCV
-
-                visualization_settings = {
-                    'font_size': font_size,
-                    'font_color': hex_to_bgr(font_color),
-                    'border_color': hex_to_bgr(border_color),
-                    'border_width': border_width,
-                    'line_color': hex_to_bgr(line_color),
-                    'line_width': line_width
-                }
-
-                # Create overlay image (this will update when selections change)
-                overlay_image = create_overlay_image(
-                    st.session_state.original_image,
-                    st.session_state.analysis_results,
-                    st.session_state.selected_spores, pixel_scale,
-                    visualization_settings)
-
-                st.image(overlay_image,
-                         caption="Detected Spores with Measurements",
-                         width='stretch')
-            else:
-                # Show skeleton placeholder while processing
-                st.info("🔄 Analysis in progress...")
-
-                # Create skeleton placeholder for image
-                st.markdown("""
-                <div style="
-                    width: 100%; 
-                    height: 400px; 
-                    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
-                    background-size: 200% 100%;
-                    animation: loading 1.5s infinite;
-                    border-radius: 8px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    color: #888;
-                    font-size: 16px;
-                ">
-                    <div>🔬 Processing spore detection...</div>
-                </div>
-                <style>
-                @keyframes loading {
-                    0% { background-position: 200% 0; }
-                    100% { background-position: -200% 0; }
-                }
-                </style>
-                """,
-                            unsafe_allow_html=True)
+            st.session_state.right_col_placeholder = st.empty()
 
     if st.session_state.analysis_complete and st.session_state.selected_spores:
         # Spore selection interface
@@ -945,6 +889,70 @@ def main():
                     st.session_state.selected_spores.add(i)
                 elif not is_selected and i in st.session_state.selected_spores:
                     st.session_state.selected_spores.remove(i)
+
+    # Now populate the right column with updated overlay image after spore selection is processed
+    if st.session_state.analysis_complete and 'right_col_placeholder' in st.session_state:
+        with st.session_state.right_col_placeholder.container():
+            st.subheader("Detection Results")
+
+            # Convert color picker hex values to BGR tuples for OpenCV
+            def hex_to_bgr(hex_color):
+                hex_color = hex_color.lstrip('#')
+                # Extract RGB values and convert to BGR order
+                r = int(hex_color[0:2], 16)
+                g = int(hex_color[2:4], 16)
+                b = int(hex_color[4:6], 16)
+                return (b, g, r)  # BGR order for OpenCV
+
+            visualization_settings = {
+                'font_size': font_size,
+                'font_color': hex_to_bgr(font_color),
+                'border_color': hex_to_bgr(border_color),
+                'border_width': border_width,
+                'line_color': hex_to_bgr(line_color),
+                'line_width': line_width
+            }
+
+            # Create overlay image with current spore selection
+            current_pixel_scale = st.session_state.get('pixel_scale', 1.0)
+            overlay_image = create_overlay_image(
+                st.session_state.original_image,
+                st.session_state.analysis_results,
+                st.session_state.selected_spores, current_pixel_scale,
+                visualization_settings)
+
+            st.image(overlay_image,
+                     caption="Detected Spores with Measurements",
+                     width='stretch')
+    elif 'right_col_placeholder' in st.session_state:
+        # Show loading placeholder in right column
+        with st.session_state.right_col_placeholder.container():
+            st.info("🔄 Analysis in progress...")
+            
+            # Create skeleton placeholder for image
+            st.markdown("""
+            <div style="
+                width: 100%; 
+                height: 400px; 
+                background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+                background-size: 200% 100%;
+                animation: loading 1.5s infinite;
+                border-radius: 8px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: #888;
+                font-size: 16px;
+            ">
+                <div>🔬 Processing spore detection...</div>
+            </div>
+            <style>
+            @keyframes loading {
+                0% { background-position: 200% 0; }
+                100% { background-position: -200% 0; }
+            }
+            </style>
+            """, unsafe_allow_html=True)
 
     # Statistics and results section
     if st.session_state.analysis_complete and st.session_state.selected_spores:
