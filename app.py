@@ -273,9 +273,48 @@ def main():
             touching_aggressiveness = st.selectbox(
                 "Detection Aggressiveness",
                 ["Conservative", "Balanced", "Aggressive"],
-                index=1,  # Default to "Balanced"
+                index=2,  # Default to "Aggressive" for better separation
                 help="Conservative: Fewer false positives, may miss some touching spores. Aggressive: More detections, may exclude some valid single spores."
             )
+            
+            st.markdown("**⚡ Watershed Separation**")
+            separate_touching = st.checkbox(
+                "Separate touching spores using watershed",
+                value=True,  # Enable by default for better separation
+                help="Use advanced watershed segmentation to automatically separate touching or overlapping spores into individual measurements"
+            )
+            
+            if separate_touching:
+                separation_min_distance = st.slider(
+                    "Separation Sensitivity",
+                    min_value=2,
+                    max_value=10,
+                    value=3,  # More aggressive than default 5
+                    step=1,
+                    help="Lower values = more aggressive separation (more likely to split touching spores)"
+                )
+                
+                separation_sigma = st.slider(
+                    "Smoothing Factor",
+                    min_value=0.5,
+                    max_value=3.0,
+                    value=0.8,  # More aggressive than default 1.0
+                    step=0.1,
+                    help="Lower values = less smoothing (more sensitive to peaks for separation)"
+                )
+                
+                separation_erosion_iterations = st.slider(
+                    "Erosion Strength",
+                    min_value=1,
+                    max_value=5,
+                    value=2,  # More aggressive than default 1
+                    step=1,
+                    help="Higher values = more erosion before separation (helps separate thicker connections)"
+                )
+            else:
+                separation_min_distance = 5
+                separation_sigma = 1.0
+                separation_erosion_iterations = 1
 
         # Image processing parameters
         st.subheader("Image Processing")
@@ -439,7 +478,11 @@ def main():
                 threshold_method=threshold_method,
                 threshold_value=threshold_value,
                 exclude_touching=exclude_touching,
-                touching_aggressiveness=touching_aggressiveness)
+                touching_aggressiveness=touching_aggressiveness,
+                separate_touching=separate_touching,
+                separation_min_distance=separation_min_distance,
+                separation_sigma=separation_sigma,
+                separation_erosion_iterations=separation_erosion_iterations)
 
             # Perform analysis
             results = analyzer.analyze_image(image_array)
