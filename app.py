@@ -540,6 +540,9 @@ def main():
 
         # Automatic analysis when image is uploaded  
         with st.spinner("Analyzing spores..."):
+            # Get pixel scale from session state or use default
+            pixel_scale = st.session_state.get('pixel_scale', 1.0)
+            
             # Configure analyzer
             analyzer = st.session_state.spore_analyzer
             analyzer.set_parameters(
