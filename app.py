@@ -884,7 +884,7 @@ def main():
                     'line_width': line_width
                 }
 
-                # Create overlay image
+                # Create overlay image (this will update when selections change)
                 overlay_image = create_overlay_image(
                     st.session_state.original_image,
                     st.session_state.analysis_results,
@@ -943,10 +943,8 @@ def main():
 
                 if is_selected and i not in st.session_state.selected_spores:
                     st.session_state.selected_spores.add(i)
-                    st.rerun()
                 elif not is_selected and i in st.session_state.selected_spores:
                     st.session_state.selected_spores.remove(i)
-                    st.rerun()
 
     # Statistics and results section
     if st.session_state.analysis_complete and st.session_state.selected_spores:
