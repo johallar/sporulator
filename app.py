@@ -36,8 +36,8 @@ if 'analysis_results' not in st.session_state:
     st.session_state.analysis_results = []
 
 
-def fetch_inaturalist_image(observation_id, size="large"):
-    """Fetch image from iNaturalist observation"""
+def fetch_inaturalist_photos(observation_id):
+    """Fetch all photos metadata from iNaturalist observation"""
     try:
         # Call iNaturalist API to get observation data
         api_url = f"https://api.inaturalist.org/v1/observations/{observation_id}"
@@ -57,10 +57,27 @@ def fetch_inaturalist_image(observation_id, size="large"):
         if not photos:
             return None
         
-        # Get the first photo
-        photo = photos[0]
-        photo_url = photo.get('url', '')
+        # Return photo metadata
+        photo_info = []
+        for i, photo in enumerate(photos):
+            photo_info.append({
+                'id': photo.get('id'),
+                'url': photo.get('url', ''),
+                'attribution': photo.get('attribution', 'Unknown'),
+                'license': photo.get('license_code', 'Unknown'),
+                'index': i
+            })
         
+        return photo_info
+        
+    except Exception as e:
+        st.error(f"Error fetching iNaturalist photos: {str(e)}")
+        return None
+
+
+def download_inaturalist_image(photo_url, size="large"):
+    """Download a specific iNaturalist image at the specified size"""
+    try:
         # Convert URL to desired size
         if '/square.jpg' in photo_url:
             image_url = photo_url.replace('/square.jpg', f'/{size}.jpg')
@@ -86,7 +103,7 @@ def fetch_inaturalist_image(observation_id, size="large"):
         return None
         
     except Exception as e:
-        st.error(f"Error fetching iNaturalist image: {str(e)}")
+        st.error(f"Error downloading iNaturalist image: {str(e)}")
         return None
 
 
@@ -551,29 +568,89 @@ def main():
             help="Enter the URL of an iNaturalist observation to analyze its images"
         )
         
-        image_quality = st.selectbox(
-            "Image Quality",
-            ["large", "medium", "original"],
-            index=0,  # Default to large
-            help="Choose image quality - larger images provide better analysis but take more time to load"
-        )
-        
         image_array = None
         if inaturalist_url:
             # Extract observation ID from URL
-            import re
             obs_match = re.search(r'/observations/(\d+)', inaturalist_url)
             if obs_match:
                 obs_id = obs_match.group(1)
                 
-                if st.button("🔍 Load iNaturalist Image", key="load_inaturalist"):
-                    with st.spinner(f"Fetching image from iNaturalist observation {obs_id}..."):
-                        image_array = fetch_inaturalist_image(obs_id, image_quality)
-                        if image_array is not None:
-                            st.success("✅ Image loaded successfully!")
-                            st.image(image_array, caption=f"iNaturalist Observation {obs_id}", width=300)
+                # Fetch photos button
+                if st.button("🔍 Fetch Available Photos", key="fetch_photos"):
+                    with st.spinner(f"Fetching photos from iNaturalist observation {obs_id}..."):
+                        photos = fetch_inaturalist_photos(obs_id)
+                        if photos:
+                            st.session_state.inaturalist_photos = photos
+                            st.session_state.obs_id = obs_id
+                            st.success(f"✅ Found {len(photos)} photo(s) in this observation!")
                         else:
-                            st.error("❌ Could not load image from iNaturalist. Please check the URL.")
+                            st.error("❌ Could not fetch photos from iNaturalist. Please check the URL.")
+                
+                # Show photo selection if photos are available
+                if 'inaturalist_photos' in st.session_state and st.session_state.get('obs_id') == obs_id:
+                    photos = st.session_state.inaturalist_photos
+                    
+                    st.markdown("**Select a photo to analyze:**")
+                    
+                    # Create photo selection interface
+                    if len(photos) == 1:
+                        selected_photo_idx = 0
+                        st.info("Only one photo available in this observation.")
+                    else:
+                        # Show thumbnails in a grid
+                        cols = st.columns(min(4, len(photos)))  # Max 4 columns
+                        
+                        # Display thumbnail preview for each photo
+                        photo_options = []
+                        for i, photo in enumerate(photos):
+                            with cols[i % 4]:
+                                # Convert URL to small size for thumbnail
+                                thumb_url = photo['url']
+                                for old_size in ['square', 'thumb', 'small', 'medium', 'large', 'original']:
+                                    if f'/{old_size}.' in thumb_url:
+                                        thumb_url = thumb_url.replace(f'/{old_size}.', '/small.')
+                                        break
+                                
+                                try:
+                                    # Display thumbnail
+                                    st.image(thumb_url, caption=f"Photo {i+1}", width=150)
+                                    photo_options.append(f"Photo {i+1} (ID: {photo['id']})")
+                                except:
+                                    st.write(f"Photo {i+1}")
+                                    photo_options.append(f"Photo {i+1} (ID: {photo['id']})")
+                        
+                        # Photo selection dropdown
+                        selected_photo_idx = st.selectbox(
+                            "Choose photo to analyze:",
+                            range(len(photos)),
+                            format_func=lambda x: photo_options[x],
+                            help="Select which photo from the observation you want to analyze"
+                        )
+                    
+                    # Image quality selection
+                    image_quality = st.selectbox(
+                        "Image Quality",
+                        ["large", "medium", "original"],
+                        index=0,  # Default to large
+                        help="Choose image quality - larger images provide better analysis but take more time to load"
+                    )
+                    
+                    # Load selected photo button
+                    if st.button("📥 Load Selected Photo", key="load_selected_photo"):
+                        selected_photo = photos[selected_photo_idx]
+                        with st.spinner(f"Loading photo {selected_photo_idx + 1} at {image_quality} quality..."):
+                            image_array = download_inaturalist_image(selected_photo['url'], image_quality)
+                            if image_array is not None:
+                                st.success("✅ Image loaded successfully!")
+                                st.image(image_array, caption=f"iNaturalist Observation {obs_id} - Photo {selected_photo_idx + 1}", width=300)
+                                
+                                # Show attribution
+                                if selected_photo['attribution'] != 'Unknown':
+                                    st.caption(f"📷 {selected_photo['attribution']}")
+                                if selected_photo['license'] != 'Unknown':
+                                    st.caption(f"📄 License: {selected_photo['license']}")
+                            else:
+                                st.error("❌ Could not load the selected image.")
             else:
                 if inaturalist_url.strip():  # Only show error if user has entered something
                     st.error("❌ Invalid iNaturalist URL. Please enter a valid observation URL.")
