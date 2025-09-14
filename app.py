@@ -446,9 +446,11 @@ def main():
                 # Convert color picker hex values to BGR tuples for OpenCV
                 def hex_to_bgr(hex_color):
                     hex_color = hex_color.lstrip('#')
-                    return tuple(
-                        int(hex_color[i:i + 2], 16)
-                        for i in (4, 2, 0))  # BGR order
+                    # Extract RGB values and convert to BGR order
+                    r = int(hex_color[0:2], 16)
+                    g = int(hex_color[2:4], 16) 
+                    b = int(hex_color[4:6], 16)
+                    return (b, g, r)  # BGR order for OpenCV
 
                 visualization_settings = {
                     'font_size': font_size,
