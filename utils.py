@@ -269,22 +269,26 @@ def create_overlay_image(original_image,
             max_width = max(max_width, line_width)
             line_heights.append(line_height)
         
-        # Calculate total text box size
-        total_height = sum(line_heights) + (len(text_lines) - 1) * 5  # 5px spacing between lines
+        # Calculate total text box size with proper baseline accounting
+        line_spacing = 5
+        total_height = sum(line_heights) + (len(text_lines) - 1) * line_spacing
         text_box_size = (max_width, total_height)
+        
+        # Calculate the actual text start position (accounting for baseline)
+        text_start_offset = line_heights[0]  # First line height for proper baseline positioning
 
         # Initial positioning - try to place text box away from spore
         contour = spore['contour']
         x, y, w, h = cv2.boundingRect(contour)
         
-        # Try different positions around the spore
+        # Try different positions around the spore (adjusted for proper text baseline)
         candidate_positions = [
-            (x + w + 20, y),  # Right of spore
-            (x - max_width - 20, y),  # Left of spore
-            (x, y - total_height - 20),  # Above spore
-            (x, y + h + 20),  # Below spore
-            (x + w + 20, y + h // 2),  # Right-center
-            (x - max_width - 20, y + h // 2),  # Left-center
+            (x + w + 20, y + text_start_offset),  # Right of spore
+            (x - max_width - 20, y + text_start_offset),  # Left of spore
+            (x, y - 20),  # Above spore
+            (x, y + h + total_height + 20),  # Below spore
+            (x + w + 20, y + h // 2 + text_start_offset),  # Right-center
+            (x - max_width - 20, y + h // 2 + text_start_offset),  # Left-center
         ]
         
         # Find best position with global collision detection
@@ -295,7 +299,8 @@ def create_overlay_image(original_image,
             candidate_y = max(total_height, min(overlay.shape[0], candidate_y))
             
             # Check if this position overlaps with any existing text rectangles
-            candidate_rect = (candidate_x, candidate_y - total_height, max_width, total_height)
+            # The rectangle should start from where the first line will be drawn
+            candidate_rect = (candidate_x, candidate_y - text_start_offset, max_width, total_height)
             overlap = False
             
             for existing_rect in global_text_rectangles:
@@ -310,18 +315,18 @@ def create_overlay_image(original_image,
         # If no non-overlapping position found, use adjust_text_position
         if text_x is None or text_y is None:
             text_x = x + w + 20
-            text_y = y + total_height
+            text_y = y + text_start_offset
             text_x, text_y = adjust_text_position(
                 text_x, text_y, text_box_size, global_text_rectangles, overlay.shape)
 
         # Store this text box rectangle for future collision detection
-        text_rect = (text_x, text_y - total_height, max_width, total_height)
+        text_rect = (text_x, text_y - text_start_offset, max_width, total_height)
         global_text_rectangles.append(text_rect)
 
         # Draw connecting line from text box to centroid
-        # Connect from the closest edge of text box to centroid
+        # Connect from the center of text box to centroid
         text_center_x = text_x + max_width // 2
-        text_center_y = text_y - total_height // 2
+        text_center_y = text_y - text_start_offset + total_height // 2
         
         cv2.line(overlay, (text_center_x, text_center_y), centroid,
                  settings['line_color'], 1)
@@ -331,11 +336,11 @@ def create_overlay_image(original_image,
             # Create mask for background area
             background_mask = np.zeros(overlay.shape[:2], dtype=np.uint8)
 
-            # Define background rectangle area
+            # Define background rectangle area (properly aligned with text)
             bg_rect = (max(0, text_x - settings['border_width']),
-                      max(0, text_y - total_height - settings['border_width']),
+                      max(0, text_y - text_start_offset - settings['border_width']),
                       min(overlay.shape[1], text_x + max_width + settings['border_width']),
-                      min(overlay.shape[0], text_y + settings['border_width']))
+                      min(overlay.shape[0], text_y - text_start_offset + total_height + settings['border_width']))
 
             # Fill mask area where background should be
             cv2.rectangle(background_mask, (bg_rect[0], bg_rect[1]),
