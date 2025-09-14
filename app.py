@@ -421,40 +421,38 @@ def main():
                                 "❌ Could not auto-detect calibration. Using manual pixel scale."
                             )
 
-        # Analysis button
-        if st.button("🔍 Analyze Spores", type="primary"):
-            with st.spinner("Analyzing spores..."):
-                # Configure analyzer
-                analyzer = st.session_state.spore_analyzer
-                analyzer.set_parameters(
-                    pixel_scale=pixel_scale,
-                    min_area=min_area,
-                    max_area=max_area,
-                    circularity_range=(circularity_min, circularity_max),
-                    aspect_ratio_range=(aspect_ratio_min, aspect_ratio_max),
-                    solidity_range=(solidity_min, solidity_max),
-                    convexity_range=(convexity_min, convexity_max),
-                    extent_range=(extent_min, extent_max),
-                    exclude_edges=exclude_edges,
-                    blur_kernel=blur_kernel,
-                    threshold_method=threshold_method,
-                    threshold_value=threshold_value,
-                    exclude_touching=exclude_touching,
-                    touching_aggressiveness=touching_aggressiveness)
+        # Automatic analysis when image is uploaded  
+        with st.spinner("Analyzing spores..."):
+            # Configure analyzer
+            analyzer = st.session_state.spore_analyzer
+            analyzer.set_parameters(
+                pixel_scale=pixel_scale,
+                min_area=min_area,
+                max_area=max_area,
+                circularity_range=(circularity_min, circularity_max),
+                aspect_ratio_range=(aspect_ratio_min, aspect_ratio_max),
+                solidity_range=(solidity_min, solidity_max),
+                convexity_range=(convexity_min, convexity_max),
+                extent_range=(extent_min, extent_max),
+                exclude_edges=exclude_edges,
+                blur_kernel=blur_kernel,
+                threshold_method=threshold_method,
+                threshold_value=threshold_value,
+                exclude_touching=exclude_touching,
+                touching_aggressiveness=touching_aggressiveness)
 
-                # Perform analysis
-                results = analyzer.analyze_image(image_array)
+            # Perform analysis
+            results = analyzer.analyze_image(image_array)
 
-                if results is not None:
-                    st.session_state.analysis_results = results
-                    st.session_state.analysis_complete = True
-                    st.session_state.selected_spores = set(range(len(results)))
-                    st.success(
-                        f"Analysis complete! Detected {len(results)} spores.")
-                    st.rerun()
-                else:
-                    st.error(
-                        "No spores detected. Try adjusting the parameters.")
+            if results is not None:
+                st.session_state.analysis_results = results
+                st.session_state.analysis_complete = True
+                st.session_state.selected_spores = set(range(len(results)))
+                st.success(
+                    f"Analysis complete! Detected {len(results)} spores.")
+            else:
+                st.error(
+                    "No spores detected. Try adjusting the parameters.")
 
         with col2:
             if st.session_state.analysis_complete:
@@ -489,10 +487,37 @@ def main():
                          caption="Detected Spores with Measurements",
                          width='stretch')
             else:
-                st.subheader("Analysis Results")
-                st.write("Processed image will appear here after analysis")
+                # Show skeleton placeholder while processing
+                st.info("🔄 Analysis in progress...")
+                
+                # Create skeleton placeholder for image
+                st.markdown("""
+                <div style="
+                    width: 100%; 
+                    height: 400px; 
+                    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+                    background-size: 200% 100%;
+                    animation: loading 1.5s infinite;
+                    border-radius: 8px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    color: #888;
+                    font-size: 16px;
+                ">
+                    <div>🔬 Processing spore detection...</div>
+                </div>
+                <style>
+                @keyframes loading {
+                    0% { background-position: 200% 0; }
+                    100% { background-position: -200% 0; }
+                }
+                </style>
+                """, unsafe_allow_html=True)
     else:
-        st.info("👆 Upload an image and click 'Analyze Spores' to begin")
+        # Show empty state when no image is uploaded
+        st.subheader("📁 Upload an Image to Begin")
+        st.info("👆 Upload a microscopy image to automatically start spore analysis")
 
     if st.session_state.analysis_complete and st.session_state.selected_spores:
         # Spore selection interface
@@ -522,14 +547,16 @@ def main():
     if st.session_state.analysis_complete and st.session_state.selected_spores:
         st.header("📈 Statistical Analysis")
 
-        # Filter selected spores
-        selected_results = [
-            st.session_state.analysis_results[i]
-            for i in st.session_state.selected_spores
-        ]
+        # Show loading spinner for statistics calculation
+        with st.spinner("Calculating statistics..."):
+            # Filter selected spores
+            selected_results = [
+                st.session_state.analysis_results[i]
+                for i in st.session_state.selected_spores
+            ]
 
-        # Calculate statistics
-        stats = calculate_statistics(selected_results)
+            # Calculate statistics
+            stats = calculate_statistics(selected_results)
 
         # Summary section
         st.subheader("📄 Summary")
