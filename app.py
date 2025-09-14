@@ -688,42 +688,50 @@ def main():
                     image_quality = st.selectbox(
                         "Image Quality",
                         ["large", "medium", "original"],
-                        index=0,  # Default to large
-                        help="Choose image quality - larger images provide better analysis but take more time to load",
-                        key="inaturalist_image_quality"
-                    )
+                        index=2,  # Default to large
+                        help=
+                        "Choose image quality - larger images provide better analysis but take more time to load",
+                        key="inaturalist_image_quality")
 
                     # Check if settings have changed and automatically load
                     if 'prev_image_quality' not in st.session_state:
                         st.session_state.prev_image_quality = image_quality
                         st.session_state.prev_selected_photo_idx = selected_photo_idx
-                    
+
                     settings_changed = (
-                        image_quality != st.session_state.prev_image_quality or
-                        selected_photo_idx != st.session_state.prev_selected_photo_idx or
-                        st.session_state.get('inaturalist_photo_changed', False)
-                    )
-                    
+                        image_quality != st.session_state.prev_image_quality
+                        or selected_photo_idx
+                        != st.session_state.prev_selected_photo_idx
+                        or st.session_state.get('inaturalist_photo_changed',
+                                                False))
+
                     # Automatically load photo when selection changes or settings change
                     if settings_changed:
                         selected_photo = photos[selected_photo_idx]
-                        with st.spinner(f"Loading photo {selected_photo_idx + 1} at {image_quality} quality..."):
-                            image_array = download_inaturalist_image(selected_photo['url'], image_quality)
+                        with st.spinner(
+                                f"Loading photo {selected_photo_idx + 1} at {image_quality} quality..."
+                        ):
+                            image_array = download_inaturalist_image(
+                                selected_photo['url'], image_quality)
                             if image_array is not None:
-                                st.success("✅ Image loaded automatically!")
-                                
+                                # st.success("✅ Image loaded automatically!")
+
                                 # Store the current settings to detect future changes
                                 st.session_state.prev_image_quality = image_quality
                                 st.session_state.prev_selected_photo_idx = selected_photo_idx
                                 st.session_state.inaturalist_photo_changed = False
-                                
+
                                 # Show attribution
                                 if selected_photo['attribution'] != 'Unknown':
-                                    st.caption(f"📷 {selected_photo['attribution']}")
+                                    st.caption(
+                                        f"📷 {selected_photo['attribution']}")
                                 if selected_photo['license'] != 'Unknown':
-                                    st.caption(f"📄 License: {selected_photo['license']}")
+                                    st.caption(
+                                        f"📄 License: {selected_photo['license']}"
+                                    )
                             else:
-                                st.error("❌ Could not load the selected image.")
+                                st.error(
+                                    "❌ Could not load the selected image.")
             else:
                 if inaturalist_url.strip(
                 ):  # Only show error if user has entered something
