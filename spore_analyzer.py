@@ -2,7 +2,8 @@ import cv2
 import numpy as np
 from scipy.spatial.distance import pdist, squareform
 from skimage import measure, morphology
-from skimage.segmentation import clear_border
+from skimage.segmentation import clear_border, watershed
+from scipy import ndimage
 import math
 import os
 import logging
@@ -57,13 +58,19 @@ class SporeAnalyzer:
         self.threshold_value = None
         self.exclude_touching = True  # exclude touching/merged spores
         self.touching_aggressiveness = "Balanced"  # Conservative, Balanced, or Aggressive
+        self.separate_touching = False  # separate touching spores using watershed
+        self.separation_min_distance = 5  # minimum distance between peaks in watershed
+        self.separation_sigma = 1.0  # gaussian sigma for peak detection
+        self.separation_erosion_iterations = 1  # erosion iterations before distance transform
     
     def set_parameters(self, pixel_scale=1.0, min_area=10, max_area=500, 
                       circularity_range=(0.3, 0.9), aspect_ratio_range=(1.0, 5.0),
                       solidity_range=(0.5, 1.0), convexity_range=(0.7, 1.0), 
                       extent_range=(0.3, 1.0), exclude_edges=True,
                       blur_kernel=5, threshold_method="Otsu", threshold_value=None,
-                      exclude_touching=True, touching_aggressiveness="Balanced"):
+                      exclude_touching=True, touching_aggressiveness="Balanced",
+                      separate_touching=False, separation_min_distance=5, 
+                      separation_sigma=1.0, separation_erosion_iterations=1):
         """Set analysis parameters"""
         self.pixel_scale = pixel_scale
         self.min_area = min_area
@@ -79,6 +86,10 @@ class SporeAnalyzer:
         self.threshold_value = threshold_value
         self.exclude_touching = exclude_touching
         self.touching_aggressiveness = touching_aggressiveness
+        self.separate_touching = separate_touching
+        self.separation_min_distance = separation_min_distance
+        self.separation_sigma = separation_sigma
+        self.separation_erosion_iterations = separation_erosion_iterations
     
     def preprocess_image(self, image):
         """Preprocess image for spore detection"""
@@ -397,6 +408,112 @@ class SporeAnalyzer:
                 return True
         return False
     
+    def _create_spore_mask(self, contour, image_shape):
+        """Create binary mask from contour"""
+        mask = np.zeros(image_shape[:2], dtype=np.uint8)
+        cv2.fillPoly(mask, [contour], (255,))
+        return mask
+    
+    def _preprocess_for_watershed(self, mask):
+        """Preprocess mask for watershed segmentation"""
+        # Apply morphological erosion to thin connected regions
+        if self.separation_erosion_iterations > 0:
+            kernel = np.ones((3, 3), np.uint8)
+            mask = cv2.erode(mask, kernel, iterations=self.separation_erosion_iterations)
+        
+        # Compute distance transform
+        distance = cv2.distanceTransform(mask, cv2.DIST_L2, 5)
+        
+        # Apply gaussian filter to smooth distance transform
+        if self.separation_sigma > 0:
+            distance = ndimage.gaussian_filter(distance, sigma=self.separation_sigma)
+        
+        return distance
+    
+    def _find_watershed_seeds(self, distance_transform):
+        """Find seeds (local maxima) for watershed segmentation"""
+        try:
+            # Find local maxima using ndimage.maximum_filter
+            # Create a mask of local maxima
+            footprint = np.ones((self.separation_min_distance, self.separation_min_distance))
+            local_maxima = (distance_transform == ndimage.maximum_filter(distance_transform, footprint=footprint))
+            
+            # Apply threshold to filter weak maxima
+            threshold = 0.3 * distance_transform.max()
+            local_maxima = local_maxima & (distance_transform >= threshold)
+            
+            # Get coordinates of local maxima
+            coordinates = np.argwhere(local_maxima)
+            
+            if len(coordinates) == 0:
+                return None
+            
+            # Create markers for watershed
+            markers = np.zeros(distance_transform.shape, dtype=np.int32)
+            for i, (y, x) in enumerate(coordinates):
+                markers[y, x] = i + 1
+            
+            return markers
+        except Exception:
+            return None
+    
+    def separate_touching_spores(self, contour, image_shape):
+        """
+        Separate touching spores using watershed segmentation.
+        
+        Args:
+            contour: Input contour representing touching spores
+            image_shape: Shape of the original image
+            
+        Returns:
+            List of separated contours or None if separation fails
+        """
+        try:
+            # Create mask from contour
+            mask = self._create_spore_mask(contour, image_shape)
+            
+            # Preprocess mask for watershed
+            distance = self._preprocess_for_watershed(mask)
+            
+            # Find watershed seeds
+            markers = self._find_watershed_seeds(distance)
+            if markers is None:
+                return None
+            
+            # Apply watershed segmentation
+            # Use negative distance as the topography
+            labels = watershed(-distance, markers, mask=mask)
+            
+            # Extract individual contours from labeled regions
+            separated_contours = []
+            for label in np.unique(labels):
+                if label == 0:  # Skip background
+                    continue
+                
+                # Create mask for this label
+                label_mask = (labels == label).astype(np.uint8) * 255
+                
+                # Find contours in the labeled region
+                contours, _ = cv2.findContours(label_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                
+                # Add valid contours (filter out very small ones)
+                for cnt in contours:
+                    area = cv2.contourArea(cnt)
+                    if area > 10:  # Minimum area threshold for separated contours
+                        separated_contours.append(cnt)
+            
+            # Return separated contours if we got more than one
+            if len(separated_contours) > 1:
+                return separated_contours
+            else:
+                # Separation didn't produce multiple valid contours
+                return None
+                
+        except Exception as e:
+            # Log the error and return None for graceful fallback
+            logging.warning(f"Watershed separation failed: {e}")
+            return None
+    
     def calculate_ellipse_dimensions(self, contour):
         """Calculate major and minor axis lengths from fitted ellipse"""
         if len(contour) < 5:
@@ -522,14 +639,18 @@ class SporeAnalyzer:
             'is_touching': False
         }
         
-        if self.exclude_touching:
+        if self.exclude_touching or self.separate_touching:
             touching_detected, touching_details = self.is_touching_spore(
                 contour, solidity, convexity, area_um2, batch_stats
             )
             
-            # Filter out touching spores if enabled
             if touching_detected:
-                return None
+                if self.separate_touching:
+                    # Return special marker indicating separation should be attempted
+                    return {'requires_separation': True, 'contour': contour, 'image_shape': image_shape}
+                elif self.exclude_touching:
+                    # Filter out touching spores if exclusion is enabled
+                    return None
         
         # Calculate centroid
         M = cv2.moments(contour)
@@ -586,7 +707,7 @@ class SporeAnalyzer:
         # Two-pass analysis for touching detection with batch statistics
         batch_stats = None
         
-        if self.exclude_touching:
+        if self.exclude_touching or self.separate_touching:
             # First pass: collect areas for batch statistics (basic filtering only)
             areas = []
             for candidate in candidates:
@@ -615,11 +736,61 @@ class SporeAnalyzer:
                 
             # Apply complete measurement and filtering logic with batch stats
             spore_data = self.analyze_spore(contour, image.shape, batch_stats)
+            
             if spore_data is not None:
-                # Add confidence score if provided
-                if 'confidence' in candidate:
-                    spore_data['detection_confidence'] = candidate['confidence']
-                spore_results.append(spore_data)
+                # Check if this requires separation
+                if isinstance(spore_data, dict) and spore_data.get('requires_separation', False):
+                    # Attempt watershed separation
+                    separated_contours = self.separate_touching_spores(contour, image.shape)
+                    
+                    if separated_contours is not None:
+                        # Analyze each separated contour individually
+                        for sep_contour in separated_contours:
+                            # Temporarily disable touching detection for separated contours
+                            old_exclude = self.exclude_touching
+                            old_separate = self.separate_touching
+                            self.exclude_touching = False
+                            self.separate_touching = False
+                            
+                            sep_data = self.analyze_spore(sep_contour, image.shape, batch_stats)
+                            
+                            # Restore original settings
+                            self.exclude_touching = old_exclude
+                            self.separate_touching = old_separate
+                            
+                            if sep_data is not None:
+                                # Add confidence score if provided
+                                if 'confidence' in candidate:
+                                    sep_data['detection_confidence'] = candidate['confidence']
+                                # Mark as separated
+                                sep_data['separated_from_touching'] = True
+                                spore_results.append(sep_data)
+                    else:
+                        # Separation failed, handle based on exclude_touching setting
+                        if not self.exclude_touching:
+                            # Temporarily disable touching detection to get the original contour analyzed
+                            old_exclude = self.exclude_touching
+                            old_separate = self.separate_touching
+                            self.exclude_touching = False
+                            self.separate_touching = False
+                            
+                            original_data = self.analyze_spore(contour, image.shape, batch_stats)
+                            
+                            # Restore original settings
+                            self.exclude_touching = old_exclude
+                            self.separate_touching = old_separate
+                            
+                            if original_data is not None:
+                                if 'confidence' in candidate:
+                                    original_data['detection_confidence'] = candidate['confidence']
+                                original_data['separation_failed'] = True
+                                spore_results.append(original_data)
+                else:
+                    # Normal case - not requiring separation
+                    # Add confidence score if provided
+                    if 'confidence' in candidate:
+                        spore_data['detection_confidence'] = candidate['confidence']
+                    spore_results.append(spore_data)
         
         return spore_results if spore_results else None
 
@@ -663,7 +834,7 @@ class SporeAnalyzer:
         # Two-pass analysis for touching detection with batch statistics
         batch_stats = None
         
-        if self.exclude_touching:
+        if self.exclude_touching or self.separate_touching:
             # First pass: collect areas for batch statistics (basic filtering only)
             areas = []
             for contour in contours:
@@ -682,8 +853,53 @@ class SporeAnalyzer:
         spore_results = []
         for contour in contours:
             spore_data = self.analyze_spore(contour, image.shape, batch_stats)
+            
             if spore_data is not None:
-                spore_results.append(spore_data)
+                # Check if this requires separation
+                if isinstance(spore_data, dict) and spore_data.get('requires_separation', False):
+                    # Attempt watershed separation
+                    separated_contours = self.separate_touching_spores(contour, image.shape)
+                    
+                    if separated_contours is not None:
+                        # Analyze each separated contour individually
+                        for sep_contour in separated_contours:
+                            # Temporarily disable touching detection for separated contours
+                            old_exclude = self.exclude_touching
+                            old_separate = self.separate_touching
+                            self.exclude_touching = False
+                            self.separate_touching = False
+                            
+                            sep_data = self.analyze_spore(sep_contour, image.shape, batch_stats)
+                            
+                            # Restore original settings
+                            self.exclude_touching = old_exclude
+                            self.separate_touching = old_separate
+                            
+                            if sep_data is not None:
+                                # Mark as separated
+                                sep_data['separated_from_touching'] = True
+                                spore_results.append(sep_data)
+                    else:
+                        # Separation failed, handle based on exclude_touching setting
+                        if not self.exclude_touching:
+                            # Temporarily disable touching detection to get the original contour analyzed
+                            old_exclude = self.exclude_touching
+                            old_separate = self.separate_touching
+                            self.exclude_touching = False
+                            self.separate_touching = False
+                            
+                            original_data = self.analyze_spore(contour, image.shape, batch_stats)
+                            
+                            # Restore original settings
+                            self.exclude_touching = old_exclude
+                            self.separate_touching = old_separate
+                            
+                            if original_data is not None:
+                                original_data['separation_failed'] = True
+                                spore_results.append(original_data)
+                else:
+                    # Normal case - not requiring separation
+                    spore_results.append(spore_data)
         
         return spore_results if spore_results else None
     
@@ -798,7 +1014,7 @@ def mask_to_contours(mask: np.ndarray, confidence_threshold: float = 0.5) -> Lis
         # Find contours
         contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
-        return contours
+        return list(contours)
     except Exception as e:
         logging.warning(f"Error converting mask to contours: {e}")
         return []
@@ -854,12 +1070,14 @@ class YOLOSegOnnxDetector(Detector):
         try:
             # Create ONNX Runtime session with CPU provider
             providers = ['CPUExecutionProvider']
-            session_options = ort.SessionOptions()
-            session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+            session_options = ort.SessionOptions() if ort else None
+            if ort and session_options:
+                session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
             
-            self.session = ort.InferenceSession(self.model_path, 
-                                              sess_options=session_options,
-                                              providers=providers)
+            if ort:
+                self.session = ort.InferenceSession(self.model_path, 
+                                                  sess_options=session_options,
+                                                  providers=providers)
             
             # Get input and output information
             self.input_name = self.session.get_inputs()[0].name
@@ -1137,7 +1355,7 @@ class YOLOSegOnnxDetector(Detector):
             outputs = self.session.run(self.output_names, {self.input_name: preprocessed_img})
             
             # Postprocess outputs
-            candidates = self._postprocess_output(outputs, scale, original_shape)
+            candidates = self._postprocess_output(list(outputs), scale, original_shape)
             
             self.logger.info(f"Detected {len(candidates)} spore candidates")
             return candidates
