@@ -636,11 +636,11 @@ def main():
                     else:
                         # Show thumbnails in a single row with clickable selection
                         cols = st.columns(len(photos))  # One column per photo
-                        
+
                         # Initialize selected photo index in session state
                         if 'selected_photo_idx' not in st.session_state:
                             st.session_state.selected_photo_idx = 0
-                        
+
                         # Display clickable thumbnails
                         for i, photo in enumerate(photos):
                             with cols[i]:
@@ -654,61 +654,73 @@ def main():
                                         thumb_url = thumb_url.replace(
                                             f'/{old_size}.', '/thumb.')
                                         break
-                                
+
                                 # Show thumbnail with click functionality
                                 try:
-                                    st.image(thumb_url, width=80)  # Much smaller thumbnails
+                                    st.image(
+                                        thumb_url,
+                                        width=100)  # Much smaller thumbnails
                                 except:
                                     st.write(f"📷 {i+1}")
-                                
+
                                 # Clickable button for selection
                                 button_label = f"{'✅ ' if st.session_state.selected_photo_idx == i else ''}Photo {i+1}"
-                                if st.button(button_label, key=f"select_photo_{i}", use_container_width=True):
+                                if st.button(
+                                        button_label,
+                                        key=f"select_photo_{i}",
+                                        use_container_width=True,
+                                ):
                                     st.session_state.selected_photo_idx = i
+                                    st.session_state.inaturalist_photo_changed = True
                                     st.rerun()
-                        
+
                         selected_photo_idx = st.session_state.selected_photo_idx
-                        
+
                         # Show which photo is currently selected
-                        st.info(f"📸 Selected: Photo {selected_photo_idx + 1} (ID: {photos[selected_photo_idx]['id']})")
+                        st.info(
+                            f"📸 Selected: Photo {selected_photo_idx + 1} (ID: {photos[selected_photo_idx]['id']})"
+                        )
 
                     # Image quality selection
                     image_quality = st.selectbox(
                         "Image Quality",
                         ["large", "medium", "original"],
                         index=0,  # Default to large
-                        help=
-                        "Choose image quality - larger images provide better analysis but take more time to load"
+                        help="Choose image quality - larger images provide better analysis but take more time to load",
+                        key="inaturalist_image_quality"
                     )
 
-                    # Load selected photo button
-                    if st.button("📥 Load Selected Photo",
-                                 key="load_selected_photo"):
+                    # Check if settings have changed and automatically load
+                    if 'prev_image_quality' not in st.session_state:
+                        st.session_state.prev_image_quality = image_quality
+                        st.session_state.prev_selected_photo_idx = selected_photo_idx
+                    
+                    settings_changed = (
+                        image_quality != st.session_state.prev_image_quality or
+                        selected_photo_idx != st.session_state.prev_selected_photo_idx or
+                        st.session_state.get('inaturalist_photo_changed', False)
+                    )
+                    
+                    # Automatically load photo when selection changes or settings change
+                    if settings_changed:
                         selected_photo = photos[selected_photo_idx]
-                        with st.spinner(
-                                f"Loading photo {selected_photo_idx + 1} at {image_quality} quality..."
-                        ):
-                            image_array = download_inaturalist_image(
-                                selected_photo['url'], image_quality)
+                        with st.spinner(f"Loading photo {selected_photo_idx + 1} at {image_quality} quality..."):
+                            image_array = download_inaturalist_image(selected_photo['url'], image_quality)
                             if image_array is not None:
-                                st.success("✅ Image loaded successfully!")
-                                st.image(
-                                    image_array,
-                                    caption=
-                                    f"iNaturalist Observation {obs_id} - Photo {selected_photo_idx + 1}",
-                                    width=300)
-
+                                st.success("✅ Image loaded automatically!")
+                                
+                                # Store the current settings to detect future changes
+                                st.session_state.prev_image_quality = image_quality
+                                st.session_state.prev_selected_photo_idx = selected_photo_idx
+                                st.session_state.inaturalist_photo_changed = False
+                                
                                 # Show attribution
                                 if selected_photo['attribution'] != 'Unknown':
-                                    st.caption(
-                                        f"📷 {selected_photo['attribution']}")
+                                    st.caption(f"📷 {selected_photo['attribution']}")
                                 if selected_photo['license'] != 'Unknown':
-                                    st.caption(
-                                        f"📄 License: {selected_photo['license']}"
-                                    )
+                                    st.caption(f"📄 License: {selected_photo['license']}")
                             else:
-                                st.error(
-                                    "❌ Could not load the selected image.")
+                                st.error("❌ Could not load the selected image.")
             else:
                 if inaturalist_url.strip(
                 ):  # Only show error if user has entered something
