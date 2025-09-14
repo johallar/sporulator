@@ -92,7 +92,7 @@ class StageCalibration:
         candidate_lines.sort(key=lambda x: x['quality_score'], reverse=True)
         return candidate_lines[0]
     
-    def detect_micrometer_divisions(self, image, min_tick_length=50, max_tick_length=150):
+    def detect_micrometer_divisions(self, image, min_tick_length=40, max_tick_length=180):
         """Detect graduated micrometer divisions (tick marks) and calculate spacing"""
         if len(image.shape) == 3:
             gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
@@ -108,9 +108,9 @@ class StageCalibration:
         # Apply edge detection with higher thresholds to reduce noise
         edges = cv2.Canny(enhanced, 100, 200, apertureSize=3)
         
-        # Detect lines using Hough transform with much higher threshold to reduce noise
-        lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=80, 
-                               minLineLength=min_tick_length, maxLineGap=10)
+        # Detect lines using Hough transform with moderate threshold
+        lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=110, 
+                               minLineLength=min_tick_length, maxLineGap=8)
         
         if lines is None:
             return None
@@ -174,8 +174,8 @@ class StageCalibration:
             
         largest_group = max(angle_groups.values(), key=len)
         
-        # Need at least 5 divisions to be confident it's a real micrometer
-        if len(largest_group) < 5:
+        # Need at least 4 divisions for reasonable confidence
+        if len(largest_group) < 4:
             return None
         
         # Determine dominant direction and sort accordingly
@@ -202,11 +202,11 @@ class StageCalibration:
         if spacings:
             median_spacing = np.median(spacings)
             
-            # Much stricter filtering - only keep very consistent spacings
-            filtered_spacings = [s for s in spacings if 0.8 * median_spacing <= s <= 1.2 * median_spacing]
+            # Moderately strict filtering - keep reasonably consistent spacings
+            filtered_spacings = [s for s in spacings if 0.7 * median_spacing <= s <= 1.3 * median_spacing]
             
-            # Need at least 3 very consistent spacings to be confident
-            if len(filtered_spacings) >= 3:
+            # Need at least 2 consistent spacings
+            if len(filtered_spacings) >= 2:
                 final_spacing = np.median(filtered_spacings)
             else:
                 return None
@@ -214,15 +214,15 @@ class StageCalibration:
             return None
         
         # Reject if spacing is too small (noise) or too large (not micrometer divisions)
-        if final_spacing <= 20 or final_spacing >= 500:  # Much stricter spacing range
+        if final_spacing <= 15 or final_spacing >= 300:  # Moderate spacing range
             return None
         
-        # Additional quality check - need very consistent line lengths
+        # Additional quality check - need reasonably consistent line lengths
         line_lengths = [line['length'] for line in largest_group]
         length_median = np.median(line_lengths)
-        consistent_lengths = [l for l in line_lengths if 0.7 * length_median <= l <= 1.3 * length_median]
+        consistent_lengths = [l for l in line_lengths if 0.6 * length_median <= l <= 1.4 * length_median]
         
-        if len(consistent_lengths) < len(largest_group) * 0.8:  # 80% must have consistent length
+        if len(consistent_lengths) < len(largest_group) * 0.7:  # 70% must have reasonably consistent length
             return None
         
         return {
