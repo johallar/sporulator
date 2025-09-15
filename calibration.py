@@ -92,7 +92,7 @@ class StageCalibration:
         candidate_lines.sort(key=lambda x: x['quality_score'], reverse=True)
         return candidate_lines[0]
     
-    def detect_micrometer_divisions(self, image, min_tick_length=20, max_tick_length=100):
+    def detect_micrometer_divisions(self, image, min_tick_length=25, max_tick_length=100):
         """Detect graduated micrometer divisions (tick marks) and calculate spacing"""
         if len(image.shape) == 3:
             gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
@@ -102,11 +102,13 @@ class StageCalibration:
         h, w = gray.shape
         
         # Apply edge detection optimized for detecting thin vertical lines (tick marks)
-        edges = cv2.Canny(gray, 50, 150, apertureSize=3)
+        # Reduced sensitivity by increasing lower threshold and reducing upper threshold
+        edges = cv2.Canny(gray, 80, 120, apertureSize=3)
         
         # Detect lines using Hough transform - looking for vertical tick marks
-        lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=20, 
-                               minLineLength=min_tick_length, maxLineGap=3)
+        # Increased threshold significantly to reduce sensitivity and target ~77 tick marks
+        lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=40, 
+                               minLineLength=min_tick_length, maxLineGap=2)
         
         if lines is None:
             return None
