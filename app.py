@@ -869,26 +869,38 @@ def main():
             st.session_state.right_col_placeholder = st.empty()
 
     if st.session_state.analysis_complete and st.session_state.selected_spores:
-        # Spore selection interface
-        st.subheader("✅ Spore Selection")
-        st.write("Click checkboxes to include/exclude spores from analysis:")
+        # Spore selection interface - collapsible and default collapsed
+        with st.expander("✅ Spore Selection", expanded=False):
+            st.write("Click badges to include/exclude spores from analysis:")
+            
+            # Create a grid of badge-style buttons for spore selection
+            results = st.session_state.analysis_results
+            cols = st.columns(6)  # More columns for compact badge layout
 
-        # Create a grid of checkboxes for spore selection
-        results = st.session_state.analysis_results
-        cols = st.columns(5)
-
-        for i, spore in enumerate(results):
-            col_idx = i % 5
-            with cols[col_idx]:
-                is_selected = st.checkbox(f"Spore {i+1}",
-                                          value=i
-                                          in st.session_state.selected_spores,
-                                          key=f"spore_{i}")
-
-                if is_selected and i not in st.session_state.selected_spores:
-                    st.session_state.selected_spores.add(i)
-                elif not is_selected and i in st.session_state.selected_spores:
-                    st.session_state.selected_spores.remove(i)
+            for i, spore in enumerate(results):
+                col_idx = i % 6
+                with cols[col_idx]:
+                    is_selected = i in st.session_state.selected_spores
+                    
+                    # Create badge button with visual indicators
+                    if is_selected:
+                        button_text = f"✅ {i+1}"
+                        button_type = "primary"
+                    else:
+                        button_text = f"⚪ {i+1}"
+                        button_type = "secondary"
+                    
+                    # Use button with dynamic styling and handle click
+                    if st.button(button_text,
+                                key=f"spore_badge_{i}",
+                                type=button_type,
+                                help=f"Spore {i+1} - Click to {'deselect' if is_selected else 'select'}",
+                                use_container_width=True):
+                        if is_selected:
+                            st.session_state.selected_spores.remove(i)
+                        else:
+                            st.session_state.selected_spores.add(i)
+                        st.rerun()
 
     # Now populate the right column with updated overlay image after spore selection is processed
     if st.session_state.analysis_complete and 'right_col_placeholder' in st.session_state:
