@@ -536,7 +536,7 @@ def render_step_2_calibration():
             
             # Configure layout for drawing
             fig.update_layout(
-                title="🖱️ Click two points to draw a measurement line",
+                title="🖱️ Use the drawing tools above to draw a measurement line",
                 xaxis=dict(
                     range=[0, display_image.shape[1]],
                     title="X coordinate (pixels)",
@@ -554,11 +554,28 @@ def render_step_2_calibration():
                 width=min(700, display_image.shape[1]),
                 height=min(600, display_image.shape[0]),
                 showlegend=False,
-                margin=dict(l=50, r=50, t=50, b=50)
+                margin=dict(l=50, r=50, t=50, b=50),
+                # Enable drawing mode
+                dragmode="drawline",
+                newshape=dict(
+                    line=dict(color="lime", width=4),
+                    opacity=0.8
+                )
             )
             
-            # Display the interactive plot
-            selected_data = st.plotly_chart(fig, use_container_width=False, key="measurement_plot")
+            # Configuration for drawing tools
+            config = {
+                'modeBarButtonsToAdd': [
+                    'drawline',
+                    'eraseshape'
+                ],
+                'modeBarButtonsToRemove': ['pan2d', 'lasso2d'],
+                'displaylogo': False,
+                'displayModeBar': True
+            }
+            
+            # Display the interactive plot with drawing tools
+            selected_data = st.plotly_chart(fig, use_container_width=False, config=config, key="measurement_plot")
             
             # Instructions for line drawing
             st.info("📌 **Click two points on the image above to draw a measurement line**")
