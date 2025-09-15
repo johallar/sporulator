@@ -843,10 +843,13 @@ def render_step_3_analysis():
                                 'border_color': hex_to_bgr(border_color),
                                 'line_color': hex_to_bgr(line_color)
                             }
+                            # Initialize selected spores (all spores by default)
+                            st.session_state.selected_spores = set(range(len(results)))
+                            
                             overlay_image = create_overlay_image(
                                 st.session_state.original_image,
                                 results,
-                                list(range(len(results))),  # selected_spores: all spores
+                                list(st.session_state.selected_spores),  # Use selected spores
                                 pixel_scale,
                                 vis_settings,
                                 True  # include_stats
@@ -896,16 +899,43 @@ def render_step_3_analysis():
             if overlay_image is not None:
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    st.image(overlay_image, caption=f"Detected {len(results)} spores with measurements", 
+                    selected_count = len(st.session_state.get('selected_spores', []))
+                    st.image(overlay_image, caption=f"Showing {selected_count} of {len(results)} detected spores", 
                             use_container_width=True)
                 with col2:
                     st.markdown("**Legend:**")
-                    st.markdown("- 🟡 Yellow lines: Length measurement")
-                    st.markdown("- 🔵 Blue lines: Width measurement") 
-                    st.markdown("- Numbers: Spore IDs")
-                    st.markdown("- Text: Length × Width (μm)")
+                    st.markdown("*Select spores to display:*")
                     
-                    if st.button("🔄 Regenerate Overlay", key="regenerate_overlay"):
+                    # Initialize selected spores if not exists
+                    if 'selected_spores' not in st.session_state:
+                        st.session_state.selected_spores = set(range(len(results)))
+                    
+                    # Spore selection checkboxes
+                    for i in range(len(results)):
+                        spore = results[i]
+                        is_selected = i in st.session_state.selected_spores
+                        checkbox_label = f"Spore {i+1} ({spore['length_um']:.1f}×{spore['width_um']:.1f} μm)"
+                        
+                        if st.checkbox(checkbox_label, value=is_selected, key=f"spore_checkbox_{i}"):
+                            st.session_state.selected_spores.add(i)
+                        else:
+                            st.session_state.selected_spores.discard(i)
+                    
+                    st.markdown("---")
+                    st.markdown("**Controls:**")
+                    
+                    # Select/Deselect all buttons
+                    col_all, col_none = st.columns(2)
+                    with col_all:
+                        if st.button("Select All", key="select_all_spores", use_container_width=True):
+                            st.session_state.selected_spores = set(range(len(results)))
+                            st.rerun()
+                    with col_none:
+                        if st.button("None", key="deselect_all_spores", use_container_width=True):
+                            st.session_state.selected_spores = set()
+                            st.rerun()
+                    
+                    if st.button("🔄 Regenerate Overlay", key="regenerate_overlay", use_container_width=True):
                         # Regenerate overlay with current settings
                         # Convert hex colors to BGR tuples (OpenCV format)
                         def hex_to_bgr(hex_color):
@@ -930,7 +960,7 @@ def render_step_3_analysis():
                         new_overlay = create_overlay_image(
                             st.session_state.original_image,
                             results,
-                            list(range(len(results))),  # selected_spores: all spores
+                            list(st.session_state.selected_spores),  # Use selected spores
                             st.session_state.get('pixel_scale', 10.0),
                             vis_settings,
                             True  # include_stats
