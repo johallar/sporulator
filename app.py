@@ -35,7 +35,7 @@ if 'calibration_complete' not in st.session_state:
 if 'analysis_results' not in st.session_state:
     st.session_state.analysis_results = []
 if 'pixel_scale' not in st.session_state:
-    st.session_state.pixel_scale = 1.0  # Default value
+    st.session_state.pixel_scale = None  # Requires explicit calibration
 
 # Wizard step management session state
 if 'current_step' not in st.session_state:
@@ -172,7 +172,10 @@ def validate_step_1():
 
 def validate_step_2():
     """Validate if Step 2 (Calibration) is complete"""
-    return st.session_state.get('calibration_complete', False) or st.session_state.get('pixel_scale', 1.0) > 0
+    pixel_scale = st.session_state.get('pixel_scale')
+    return (st.session_state.get('calibration_complete', False) and 
+            pixel_scale is not None and 
+            pixel_scale > 0)
 
 
 def render_navigation_buttons():
@@ -397,11 +400,15 @@ def render_step_2_calibration():
         st.markdown("### 📝 Manual Entry")
         st.info("Enter the known pixel scale for your microscopy setup.")
         
+        current_value = st.session_state.get('pixel_scale', 10.0)
+        if current_value is None:
+            current_value = 10.0
+            
         pixel_scale = st.number_input(
             "Pixel Scale (pixels/μm)",
             min_value=0.1,
             max_value=100.0,
-            value=st.session_state.get('pixel_scale', 10.0),
+            value=current_value,
             step=0.1,
             help="Number of pixels per micrometer. This converts pixel measurements to micrometers."
         )
@@ -471,50 +478,114 @@ def render_step_2_calibration():
 
     elif calibration_method == "Manual Measurement":
         st.markdown("### 📐 Manual Measurement")
-        st.info("Draw a measurement line on your image to manually calibrate the pixel scale.")
+        st.info("Measure a known distance by entering the coordinates of two points on your image.")
         
-        # Input fields for measurement
-        col_a, col_b = st.columns(2)
-        with col_a:
-            num_divisions = st.number_input(
-                "Number of divisions covered",
-                min_value=1,
-                max_value=100,
-                value=5,
-                step=1,
-                help="How many scale divisions does your measurement span?")
-        
-        with col_b:
-            um_per_division = st.number_input(
-                "Micrometers per division (μm)",
-                min_value=0.1,
-                max_value=1000.0,
-                value=10.0,
-                step=0.1,
-                help="The distance each scale division represents")
-        
-        # Initialize manual measurement session state
-        if 'manual_measurement_points' not in st.session_state:
-            st.session_state.manual_measurement_points = []
-        if 'manual_calibration_complete' not in st.session_state:
-            st.session_state.manual_calibration_complete = False
-        
-        # Store calibration parameters in session state
-        st.session_state.manual_num_divisions = num_divisions
-        st.session_state.manual_um_per_division = um_per_division
-        
-        # Show current pixel scale and status
-        pixel_scale = st.session_state.get('pixel_scale', 10.0)
-        if st.session_state.get('manual_calibration_complete', False):
-            st.success(f"✅ Calibrated: {pixel_scale:.2f} pixels/μm")
-            st.session_state.calibration_complete = True
+        if 'original_image' in st.session_state:
+            # Display image with clickable coordinates
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                st.markdown("**Step 1:** Click on the image below or view it to identify two points with a known distance")
+                image_array = st.session_state.original_image
+                # Display the image
+                st.image(st.session_state.display_image, 
+                        caption=f"Image size: {image_array.shape[1]} × {image_array.shape[0]} pixels", 
+                        use_container_width=True)
+            
+            with col2:
+                st.markdown("**Step 2:** Enter coordinates")
+                
+                # Initialize session state for manual measurement
+                if 'manual_point1' not in st.session_state:
+                    st.session_state.manual_point1 = (100, 100)
+                if 'manual_point2' not in st.session_state:
+                    st.session_state.manual_point2 = (200, 200)
+                if 'manual_known_distance' not in st.session_state:
+                    st.session_state.manual_known_distance = 50.0
+                
+                # Point 1 coordinates
+                st.markdown("**Point 1:**")
+                col_x1, col_y1 = st.columns(2)
+                with col_x1:
+                    x1 = st.number_input("X1", min_value=0, max_value=image_array.shape[1], 
+                                        value=st.session_state.manual_point1[0], key="x1_input")
+                with col_y1:
+                    y1 = st.number_input("Y1", min_value=0, max_value=image_array.shape[0], 
+                                        value=st.session_state.manual_point1[1], key="y1_input")
+                
+                # Point 2 coordinates
+                st.markdown("**Point 2:**")
+                col_x2, col_y2 = st.columns(2)
+                with col_x2:
+                    x2 = st.number_input("X2", min_value=0, max_value=image_array.shape[1], 
+                                        value=st.session_state.manual_point2[0], key="x2_input")
+                with col_y2:
+                    y2 = st.number_input("Y2", min_value=0, max_value=image_array.shape[0], 
+                                        value=st.session_state.manual_point2[1], key="y2_input")
+                
+                # Store points
+                st.session_state.manual_point1 = (int(x1), int(y1))
+                st.session_state.manual_point2 = (int(x2), int(y2))
+                
+                # Known distance input
+                known_distance = st.number_input(
+                    "Known distance (μm)",
+                    min_value=0.1,
+                    max_value=10000.0,
+                    value=st.session_state.manual_known_distance,
+                    step=0.1,
+                    help="The actual distance between these two points in micrometers"
+                )
+                st.session_state.manual_known_distance = known_distance
+                
+                # Calculate current distance in pixels
+                point1 = st.session_state.manual_point1
+                point2 = st.session_state.manual_point2
+                pixel_distance = np.sqrt((point2[0] - point1[0])**2 + (point2[1] - point1[1])**2)
+                
+                st.info(f"**Distance in pixels:** {pixel_distance:.1f}px")
+                
+                # Apply calibration button
+                if st.button("🎯 Apply Calibration", type="primary", key="apply_manual_calibration"):
+                    if pixel_distance > 0 and known_distance > 0:
+                        # Use calibration.py manual_calibration method
+                        calibration_result = st.session_state.calibration.manual_calibration(
+                            st.session_state.original_image, point1, point2, known_distance
+                        )
+                        
+                        if calibration_result:
+                            st.session_state.pixel_scale = calibration_result['pixel_scale']
+                            st.session_state.calibration_complete = True
+                            st.session_state.manual_calibration_complete = True
+                            st.session_state.manual_calibration_visualization = calibration_result['visualization']
+                            st.success(f"✅ Calibration applied! Scale: {calibration_result['pixel_scale']:.2f} pixels/μm")
+                            st.rerun()
+                        else:
+                            st.error("Failed to calculate calibration. Please check your inputs.")
+                    else:
+                        st.error("Invalid distance values. Please check your inputs.")
+            
+            # Show calibration result if completed
+            if st.session_state.get('manual_calibration_complete', False) and 'manual_calibration_visualization' in st.session_state:
+                st.markdown("### 📏 Calibration Result")
+                col1, col2 = st.columns([2, 1])
+                with col1:
+                    st.image(st.session_state.manual_calibration_visualization, 
+                            caption="Calibration Line Visualization", use_container_width=True)
+                with col2:
+                    pixel_scale = st.session_state.get('pixel_scale')
+                    if pixel_scale:
+                        st.success(f"✅ **Calibrated!**")
+                        st.metric("Pixel Scale", f"{pixel_scale:.2f} pixels/μm")
+                        
+                        if st.button("🔄 Recalibrate", key="recalibrate_manual"):
+                            st.session_state.calibration_complete = False
+                            st.session_state.manual_calibration_complete = False
+                            if 'manual_calibration_visualization' in st.session_state:
+                                del st.session_state.manual_calibration_visualization
+                            st.rerun()
         else:
-            st.info(f"Current: {pixel_scale:.2f} pixels/μm")
-            if 'original_image' in st.session_state:
-                st.warning("👆 **Manual measurement drawing interface would be here** (requires streamlit-drawable-canvas)")
-                st.info("For now, please use Manual Entry method or Auto-Detect method.")
-            else:
-                st.warning("No image available for measurement")
+            st.warning("⚠️ No image available for measurement. Please complete Step 1 first.")
     
     # Show step completion status
     if validate_step_2():
@@ -678,20 +749,31 @@ def render_step_3_analysis():
 
     # Visualization Settings
     with st.expander("🎨 Visualization Settings", expanded=False):
-        font_size = st.slider("Font Size",
-                              min_value=0.5,
-                              max_value=3.0,
-                              value=1.6,
-                              step=0.1,
-                              help="Size of measurement text")
-
+        # Display Options
         col1, col2 = st.columns(2)
         with col1:
+            show_labels = st.checkbox("Show Spore Labels", value=True, help="Show spore ID numbers")
+            show_measurements = st.checkbox("Show Measurements", value=True, help="Show length/width measurements")
+        with col2:
+            overlay_color_map = st.selectbox("Color Scheme", ["rainbow", "viridis", "plasma", "cool", "hot"], 
+                                           index=0, help="Color scheme for spore visualization")
+            background_alpha = st.slider("Background Transparency", min_value=0.0, max_value=1.0, 
+                                       value=0.7, step=0.1, help="Text background transparency")
+        
+        # Font Settings
+        label_fontsize = st.slider("Label Font Size", min_value=0.5, max_value=3.0, value=1.6, step=0.1,
+                                 help="Size of spore ID numbers")
+        measurement_fontsize = st.slider("Measurement Font Size", min_value=0.5, max_value=3.0, value=1.2, step=0.1,
+                                        help="Size of measurement text")
+
+        # Colors and Style
+        col3, col4 = st.columns(2)
+        with col3:
             font_color = st.color_picker("Font Color", value="#FFFFFF", help="Color of measurement text")
             border_color = st.color_picker("Text Background Color", value="#000000", help="Color of text background box")
             line_color = st.color_picker("Line Color", value="#00FFFF", help="Color of measurement lines and spore borders")
 
-        with col2:
+        with col4:
             border_width = st.slider("Text Background Size", min_value=0, max_value=10, value=8, help="Width of text background borders (0 = no background)")
             line_width = st.slider("Line Width", min_value=1, max_value=10, value=2, help="Width of measurement lines")
 
@@ -704,11 +786,69 @@ def render_step_3_analysis():
         if st.button("🔬 **Analyze Spores**", key="analyze_button", use_container_width=True, type="primary"):
             if 'original_image' in st.session_state:
                 with st.spinner("Analyzing spores in the image..."):
-                    # TODO: Add the actual analysis logic here
-                    # This would call the existing spore analysis functions with the parameters
-                    st.success("✅ Analysis completed! (Analysis integration pending)")
-                    st.session_state.analysis_complete = True
-                    st.session_state.step_3_complete = True
+                    try:
+                        # Get analysis parameters from UI
+                        analyzer = st.session_state.spore_analyzer
+                        pixel_scale = st.session_state.get('pixel_scale', 10.0)
+                        
+                        # Set parameters on analyzer
+                        analyzer.set_parameters(
+                            pixel_scale=pixel_scale,
+                            min_area=min_area,
+                            max_area=max_area,
+                            circularity_range=(circularity_min, circularity_max),
+                            aspect_ratio_range=(aspect_ratio_min, aspect_ratio_max),
+                            solidity_range=(solidity_min, solidity_max),
+                            convexity_range=(convexity_min, convexity_max),
+                            extent_range=(extent_min, extent_max),
+                            exclude_edges=exclude_edges,
+                            blur_kernel=blur_kernel,
+                            threshold_method=threshold_method,
+                            threshold_value=threshold_value if threshold_method == "Manual" else None,
+                            exclude_touching=exclude_touching,
+                            touching_aggressiveness=touching_aggressiveness,
+                            separate_touching=separate_touching,
+                            separation_min_distance=separation_min_distance,
+                            separation_sigma=separation_sigma,
+                            separation_erosion_iterations=separation_erosion_iterations
+                        )
+                        
+                        # Run analysis
+                        results = analyzer.analyze_image(st.session_state.original_image)
+                        
+                        if results and len(results) > 0:
+                            # Store results in session state
+                            st.session_state.analysis_results = results
+                            st.session_state.analysis_complete = True
+                            st.session_state.step_3_complete = True
+                            
+                            # Create overlay image for visualization  
+                            vis_settings = {
+                                'color_map': overlay_color_map,
+                                'show_labels': show_labels,
+                                'show_measurements': show_measurements,
+                                'label_fontsize': label_fontsize,
+                                'measurement_fontsize': measurement_fontsize,
+                                'background_alpha': background_alpha,
+                                'border_width': border_width,
+                                'line_width': line_width
+                            }
+                            overlay_image = create_overlay_image(
+                                st.session_state.original_image,
+                                results,
+                                list(range(len(results))),  # selected_spores: all spores
+                                pixel_scale,
+                                vis_settings,
+                                True  # include_stats
+                            )
+                            st.session_state.overlay_image = overlay_image
+                            
+                            st.success(f"✅ Analysis completed! Found {len(results)} spores.")
+                            st.rerun()
+                        else:
+                            st.warning("⚠️ No spores detected with current parameters. Try adjusting the detection settings.")
+                    except Exception as e:
+                        st.error(f"❌ Analysis failed: {str(e)}")
             else:
                 st.error("❌ No image available for analysis.")
     
@@ -721,15 +861,212 @@ def render_step_3_analysis():
     # Results Section (placeholder for now)
     if st.session_state.get('analysis_complete', False):
         st.markdown("## 📈 Analysis Results")
-        st.info("🚧 **Results display will be implemented here**")
-        st.markdown("This section will include:")
-        st.markdown("- Detected spores overlay image")
-        st.markdown("- Measurement statistics and charts")  
-        st.markdown("- Spore selection interface")
-        st.markdown("- Export options (CSV, PDF report)")
         
-        # Placeholder success message
-        st.success("✅ Step 3 Complete! Analysis finished successfully.")
+        # Get results from session state
+        results = st.session_state.get('analysis_results', [])
+        overlay_image = st.session_state.get('overlay_image', None)
+        
+        if results and len(results) > 0:
+            # Display summary metrics
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Spores", len(results))
+            with col2:
+                avg_length = np.mean([spore['length_um'] for spore in results])
+                st.metric("Avg Length", f"{avg_length:.1f} μm")
+            with col3:
+                avg_width = np.mean([spore['width_um'] for spore in results])
+                st.metric("Avg Width", f"{avg_width:.1f} μm")
+            with col4:
+                avg_area = np.mean([spore['area_um2'] for spore in results])
+                st.metric("Avg Area", f"{avg_area:.1f} μm²")
+            
+            # Display overlay image
+            st.markdown("### 🔬 Detected Spores Visualization")
+            if overlay_image is not None:
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.image(overlay_image, caption=f"Detected {len(results)} spores with measurements", 
+                            use_container_width=True)
+                with col2:
+                    st.markdown("**Legend:**")
+                    st.markdown("- 🟡 Yellow lines: Length measurement")
+                    st.markdown("- 🔵 Blue lines: Width measurement") 
+                    st.markdown("- Numbers: Spore IDs")
+                    st.markdown("- Text: Length × Width (μm)")
+                    
+                    if st.button("🔄 Regenerate Overlay", key="regenerate_overlay"):
+                        # Regenerate overlay with current settings
+                        vis_settings = {
+                            'color_map': overlay_color_map,
+                            'show_labels': show_labels,
+                            'show_measurements': show_measurements,
+                            'label_fontsize': label_fontsize,
+                            'measurement_fontsize': measurement_fontsize,
+                            'background_alpha': background_alpha,
+                            'border_width': border_width,
+                            'line_width': line_width
+                        }
+                        new_overlay = create_overlay_image(
+                            st.session_state.original_image,
+                            results,
+                            list(range(len(results))),  # selected_spores: all spores
+                            st.session_state.get('pixel_scale', 10.0),
+                            vis_settings,
+                            True  # include_stats
+                        )
+                        st.session_state.overlay_image = new_overlay
+                        st.rerun()
+            
+            # Results table and statistics
+            st.markdown("### 📊 Measurement Data & Statistics")
+            
+            # Create dataframe for display
+            df_data = []
+            for i, spore in enumerate(results):
+                df_data.append({
+                    'ID': i + 1,
+                    'Length (μm)': round(spore['length_um'], 2),
+                    'Width (μm)': round(spore['width_um'], 2),
+                    'Area (μm²)': round(spore['area_um2'], 2),
+                    'Aspect Ratio': round(spore['aspect_ratio'], 2),
+                    'Circularity': round(spore['circularity'], 3),
+                    'Solidity': round(spore['solidity'], 3),
+                    'Convexity': round(spore['convexity'], 3),
+                    'Extent': round(spore['extent'], 3)
+                })
+            
+            df = pd.DataFrame(df_data)
+            
+            # Display table with selection capability
+            st.markdown("**Individual Spore Measurements:**")
+            st.dataframe(df, use_container_width=True, height=300)
+            
+            # Calculate and display statistics
+            stats = calculate_statistics(results)
+            if stats:
+                st.markdown("**Summary Statistics:**")
+                
+                stats_col1, stats_col2 = st.columns(2)
+                with stats_col1:
+                    st.markdown("**Length (μm):**")
+                    st.markdown(f"- Mean: {stats['length_mean']:.2f} ± {stats['length_std']:.2f}")
+                    st.markdown(f"- Range: {stats['length_min']:.2f} - {stats['length_max']:.2f}")
+                    st.markdown(f"- Median: {stats['length_median']:.2f}")
+                    
+                    st.markdown("**Area (μm²):**")
+                    st.markdown(f"- Mean: {stats['area_mean']:.2f} ± {stats['area_std']:.2f}")
+                    st.markdown(f"- Range: {stats['area_min']:.2f} - {stats['area_max']:.2f}")
+                    st.markdown(f"- Median: {stats['area_median']:.2f}")
+                
+                with stats_col2:
+                    st.markdown("**Width (μm):**")
+                    st.markdown(f"- Mean: {stats['width_mean']:.2f} ± {stats['width_std']:.2f}")
+                    st.markdown(f"- Range: {stats['width_min']:.2f} - {stats['width_max']:.2f}")
+                    st.markdown(f"- Median: {stats['width_median']:.2f}")
+                    
+                    st.markdown("**Aspect Ratio:**")
+                    st.markdown(f"- Mean: {stats['aspect_ratio_mean']:.2f} ± {stats['aspect_ratio_std']:.2f}")
+                    st.markdown(f"- Range: {stats['aspect_ratio_min']:.2f} - {stats['aspect_ratio_max']:.2f}")
+            
+            # Generate mycological summary
+            st.markdown("### 📋 Mycological Summary")
+            with st.expander("📝 Standard Format Summary", expanded=False):
+                mycological_summary = generate_mycological_summary(results)
+                st.markdown(mycological_summary)
+                
+                # Copy to clipboard button
+                if st.button("📋 Copy Summary to Clipboard", key="copy_summary"):
+                    st.code(mycological_summary, language=None)
+                    st.success("Summary displayed above - you can copy it manually.")
+            
+            # Export functionality
+            st.markdown("### 📥 Export Results")
+            export_col1, export_col2, export_col3 = st.columns(3)
+            
+            with export_col1:
+                if st.button("📊 Export CSV", key="export_csv", use_container_width=True):
+                    try:
+                        # Convert results to dataframe for export
+                        df_export = pd.DataFrame([{
+                            'Length_um': spore['length_um'],
+                            'Width_um': spore['width_um'], 
+                            'Area_um2': spore['area_um2'],
+                            'Aspect_Ratio': spore['aspect_ratio'],
+                            'Circularity': spore['circularity'],
+                            'Solidity': spore['solidity'],
+                            'Convexity': spore['convexity'],
+                            'Extent': spore['extent']
+                        } for spore in results])
+                        csv_data = export_results(df_export, format_type='csv')
+                        if csv_data:
+                            st.download_button(
+                                label="💾 Download CSV File",
+                                data=csv_data,
+                                file_name=f"spore_analysis_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                                mime="text/csv",
+                                use_container_width=True
+                            )
+                        else:
+                            st.error("Failed to generate CSV export")
+                    except Exception as e:
+                        st.error(f"Export failed: {str(e)}")
+            
+            with export_col2:
+                if st.button("📈 Export Excel", key="export_excel", use_container_width=True):
+                    try:
+                        # Convert results to dataframe for export
+                        df_export = pd.DataFrame([{
+                            'Length_um': spore['length_um'],
+                            'Width_um': spore['width_um'], 
+                            'Area_um2': spore['area_um2'],
+                            'Aspect_Ratio': spore['aspect_ratio'],
+                            'Circularity': spore['circularity'],
+                            'Solidity': spore['solidity'],
+                            'Convexity': spore['convexity'],
+                            'Extent': spore['extent']
+                        } for spore in results])
+                        excel_data = export_results(df_export, format_type='excel')
+                        if excel_data:
+                            st.download_button(
+                                label="💾 Download Excel File",
+                                data=excel_data,
+                                file_name=f"spore_analysis_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True
+                            )
+                        else:
+                            st.error("Failed to generate Excel export")
+                    except Exception as e:
+                        st.error(f"Export failed: {str(e)}")
+            
+            with export_col3:
+                if st.button("🖼️ Save Overlay", key="export_overlay", use_container_width=True):
+                    if overlay_image is not None:
+                        try:
+                            # Convert numpy array to PIL Image and then to bytes
+                            pil_image = Image.fromarray(overlay_image)
+                            img_buffer = io.BytesIO()
+                            pil_image.save(img_buffer, format='PNG')
+                            
+                            st.download_button(
+                                label="💾 Download Overlay Image",
+                                data=img_buffer.getvalue(),
+                                file_name=f"spore_overlay_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.png",
+                                mime="image/png",
+                                use_container_width=True
+                            )
+                        except Exception as e:
+                            st.error(f"Failed to save overlay image: {str(e)}")
+                    else:
+                        st.error("No overlay image available")
+            
+            # Mark step 3 as complete
+            st.session_state.step_3_complete = True
+            st.success("✅ Step 3 Complete! Analysis finished successfully.")
+            
+        else:
+            st.warning("⚠️ No analysis results available. Please run the analysis first.")
     else:
         st.info("🔬 Click 'Analyze Spores' to begin the analysis.")
 
