@@ -499,7 +499,8 @@ def render_step_2_calibration():
                     st.markdown("**Measurement complete!** Review the line below.")
                 
                 # Create image with current points and line
-                display_image = st.session_state.display_image.copy()
+                # Convert PIL image to numpy array for OpenCV operations
+                display_image = np.array(st.session_state.display_image.copy())
                 
                 # Draw existing points and line
                 if len(st.session_state.manual_click_points) >= 1:
