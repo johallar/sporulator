@@ -574,11 +574,52 @@ def render_step_2_calibration():
                 'displayModeBar': True
             }
             
-            # Display the interactive plot with drawing tools
-            selected_data = st.plotly_chart(fig, use_container_width=False, config=config, key="measurement_plot")
+            # Display the interactive plot with drawing tools and capture events
+            from streamlit_plotly_events import plotly_events
             
-            # Instructions for line drawing
-            st.info("📌 **Click two points on the image above to draw a measurement line**")
+            selected_data = plotly_events(
+                fig, 
+                click_event=False, 
+                hover_event=False, 
+                select_event=False,
+                relayout_event=True,  # This captures drawing events
+                key="measurement_plot",
+                override_height=min(600, display_image.shape[0]),
+                override_width=min(700, display_image.shape[1])
+            )
+            
+            # Process drawing events to capture line coordinates
+            if selected_data and 'relayout' in selected_data and selected_data['relayout']:
+                relayout_data = selected_data['relayout']
+                
+                # Check for new shapes (drawn lines)
+                if 'shapes' in relayout_data:
+                    shapes = relayout_data['shapes']
+                    if shapes and len(shapes) > 0:
+                        # Get the most recent shape (last drawn line)
+                        latest_shape = shapes[-1]
+                        
+                        if latest_shape.get('type') == 'line':
+                            # Extract line coordinates
+                            x1 = latest_shape.get('x0', 0)
+                            y1 = latest_shape.get('y0', 0)
+                            x2 = latest_shape.get('x1', 0)
+                            y2 = latest_shape.get('y1', 0)
+                            
+                            # Store coordinates in session state
+                            new_coords = (int(x1), int(y1), int(x2), int(y2))
+                            if st.session_state.manual_line_coords != new_coords:
+                                st.session_state.manual_line_coords = new_coords
+                                st.success(f"✅ **Line captured!** Coordinates: ({int(x1)}, {int(y1)}) to ({int(x2)}, {int(y2)})")
+                                st.rerun()
+            
+            # Show current line status
+            if st.session_state.manual_line_coords:
+                x1, y1, x2, y2 = st.session_state.manual_line_coords
+                pixel_distance = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+                st.info(f"📏 **Current line:** ({x1}, {y1}) to ({x2}, {y2}) - Length: {pixel_distance:.1f} pixels")
+            else:
+                st.info("📌 **Draw a measurement line using the drawing tools above**")
             
             # Initialize click points if not exist
             if 'manual_click_points' not in st.session_state:
