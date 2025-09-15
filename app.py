@@ -594,19 +594,35 @@ def render_step_2_calibration():
                 st.info("📌 **Draw a measurement line using the drawing tools above, then click 'Capture Line' below**")
             
             with col2:
-                # Simple instruction for drawing
-                if st.button("📋 Use Drawing Tools", type="primary", key="drawing_help_btn"):
-                    st.info("""
-                    🖱️ **How to use drawing tools:**
-                    1. Click the **line drawing tool** in the toolbar above the image
-                    2. Click and drag to draw your measurement line
-                    3. When done, set the real-world distance below
-                    """)
+                # Capture drawn line button
+                if st.button("📏 Capture Drawn Line", type="primary", key="capture_line_btn"):
+                    st.session_state.show_coord_input = True
+                    st.rerun()
                 
                 # Clear any existing line
                 if st.button("🗑️ Clear Line", key="clear_drawn_line"):
                     st.session_state.manual_line_coords = None
                     st.rerun()
+            
+            # Simple coordinate input for drawn line
+            if st.session_state.get('show_coord_input', False):
+                st.markdown("**📍 Enter the coordinates of your drawn line:**")
+                col1, col2, col3 = st.columns([1, 1, 1])
+                
+                with col1:
+                    x1 = st.number_input("Start X", min_value=0, max_value=display_image.shape[1], value=100, key="coord_x1")
+                    y1 = st.number_input("Start Y", min_value=0, max_value=display_image.shape[0], value=100, key="coord_y1")
+                
+                with col2:
+                    x2 = st.number_input("End X", min_value=0, max_value=display_image.shape[1], value=300, key="coord_x2")
+                    y2 = st.number_input("End Y", min_value=0, max_value=display_image.shape[0], value=200, key="coord_y2")
+                
+                with col3:
+                    st.write("") # spacing
+                    if st.button("✅ Set Coordinates", key="set_coords"):
+                        st.session_state.manual_line_coords = (int(x1), int(y1), int(x2), int(y2))
+                        st.session_state.show_coord_input = False
+                        st.rerun()
             
             # Show current line status
             if st.session_state.manual_line_coords:
