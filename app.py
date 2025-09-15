@@ -9,6 +9,7 @@ import io
 import base64
 import requests
 import re
+from streamlit_drawable_canvas import st_canvas
 from spore_analyzer import SporeAnalyzer
 from utils import calculate_statistics, create_overlay_image, export_results, generate_mycological_summary
 from calibration import StageCalibration
@@ -478,145 +479,187 @@ def render_step_2_calibration():
 
     elif calibration_method == "Manual Measurement":
         st.markdown("### 📐 Manual Measurement")
-        st.info("Draw a line on your image by clicking two points to measure a known distance.")
+        st.info("🖱️ **Instructions:** Use the drawing tool below to drag a line across a known distance on your image.")
         
         if 'original_image' in st.session_state:
-            col1, col2 = st.columns([3, 1])
+            # Initialize session state for manual measurement
+            if 'manual_line_drawn' not in st.session_state:
+                st.session_state.manual_line_drawn = False
+            if 'manual_line_coords' not in st.session_state:
+                st.session_state.manual_line_coords = None
+            
+            # Create drawable canvas for line drawing
+            display_image = np.array(st.session_state.display_image.copy())
+            
+            # Create the canvas
+            canvas_result = st_canvas(
+                fill_color="rgba(255, 165, 0, 0.3)",
+                stroke_width=4,
+                stroke_color="#00FF00",  # Lime green
+                background_color="#000000",
+                background_image=st.session_state.display_image,
+                update_streamlit=True,
+                height=min(600, display_image.shape[0]),
+                width=min(700, display_image.shape[1]),
+                drawing_mode="line",
+                point_display_radius=8,
+                display_toolbar=True,
+                key="manual_measurement_canvas",
+            )
+            
+            # Extract line coordinates when drawn
+            if canvas_result.json_data is not None and "objects" in canvas_result.json_data:
+                objects = canvas_result.json_data["objects"]
+                if objects:
+                    # Get the most recent line (last object)
+                    line_obj = objects[-1]
+                    if line_obj["type"] == "line":
+                        # Get canvas dimensions and scale factors
+                        canvas_width = min(700, display_image.shape[1])
+                        canvas_height = min(600, display_image.shape[0])
+                        scale_x = display_image.shape[1] / canvas_width
+                        scale_y = display_image.shape[0] / canvas_height
+                        
+                        # Extract line coordinates and scale to original image size
+                        x1 = int((line_obj["x1"] + line_obj["left"]) * scale_x)
+                        y1 = int((line_obj["y1"] + line_obj["top"]) * scale_y)
+                        x2 = int((line_obj["x2"] + line_obj["left"]) * scale_x)
+                        y2 = int((line_obj["y2"] + line_obj["top"]) * scale_y)
+                        
+                        # Store coordinates in session state
+                        new_coords = (x1, y1, x2, y2)
+                        if st.session_state.manual_line_coords != new_coords:
+                            st.session_state.manual_line_coords = new_coords
+                            st.session_state.manual_line_drawn = True
+                            st.rerun()
+            
+            # Canvas drawing instructions
+            st.info("🖱️ **Instructions:** Use the line tool from the canvas toolbar above to click and drag a measurement line across a known distance on your image.")
+            
+            # Show current line info if available
+            if st.session_state.manual_line_coords:
+                x1, y1, x2, y2 = st.session_state.manual_line_coords
+                pixel_distance = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+                col_info, col_clear = st.columns([3, 1])
+                with col_info:
+                    st.success(f"📏 Line drawn: {pixel_distance:.1f} pixels from ({x1}, {y1}) to ({x2}, {y2})")
+                with col_clear:
+                    if st.button("🔄 Clear Line", key="clear_canvas_line"):
+                        st.session_state.manual_line_coords = None
+                        st.session_state.manual_line_drawn = False
+                        st.rerun()
+            
+            # Alternative input method for precise coordinates
+            st.markdown("---")
+            st.markdown("**Alternative: Enter coordinates manually**")
+            
+            col1, col2 = st.columns(2)
             
             with col1:
-                # Initialize session state for manual measurement
-                if 'manual_click_points' not in st.session_state:
-                    st.session_state.manual_click_points = []
-                if 'manual_measurement_complete' not in st.session_state:
-                    st.session_state.manual_measurement_complete = False
-                
-                # Instructions based on current state
-                if len(st.session_state.manual_click_points) == 0:
-                    st.markdown("**Step 1:** Click on the image to set the first point")
-                elif len(st.session_state.manual_click_points) == 1:
-                    st.markdown("**Step 2:** Click on the image to set the second point")
-                else:
-                    st.markdown("**Measurement complete!** Review the line below.")
-                
-                # Create image with current points and line
-                # Convert PIL image to numpy array for OpenCV operations
-                display_image = np.array(st.session_state.display_image.copy())
-                
-                # Draw existing points and line
-                if len(st.session_state.manual_click_points) >= 1:
-                    # Draw first point
-                    cv2.circle(display_image, st.session_state.manual_click_points[0], 8, (0, 255, 0), -1)
-                    cv2.putText(display_image, "1", 
-                               (st.session_state.manual_click_points[0][0] + 12, st.session_state.manual_click_points[0][1] - 8),
-                               cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                
-                if len(st.session_state.manual_click_points) >= 2:
-                    # Draw second point
-                    cv2.circle(display_image, st.session_state.manual_click_points[1], 8, (0, 255, 0), -1)
-                    cv2.putText(display_image, "2", 
-                               (st.session_state.manual_click_points[1][0] + 12, st.session_state.manual_click_points[1][1] - 8),
-                               cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                    
-                    # Draw line between points
-                    cv2.line(display_image, st.session_state.manual_click_points[0], st.session_state.manual_click_points[1], (0, 255, 0), 3)
-                
-                # Use plotly for click detection
-                import plotly.graph_objects as go
-                import plotly.express as px
-                
-                # Convert image to plotly format
-                fig = px.imshow(display_image)
-                fig.update_layout(
-                    title="Click to place measurement points",
-                    xaxis_title="X coordinate (pixels)",
-                    yaxis_title="Y coordinate (pixels)",
-                    height=600
-                )
-                
-                # Capture click events
-                clicked_data = st.plotly_chart(fig, use_container_width=True, key="manual_measurement_plot")
-                
-                # Handle clicks (this is a simplified approach - Streamlit doesn't directly support click events)
-                # Instead, we'll use coordinate inputs that update based on the visual feedback
-                st.markdown("**Click coordinates (if clicking doesn't work, enter manually):**")
-                
-                # Coordinate inputs for fallback
-                if len(st.session_state.manual_click_points) == 0:
-                    x1 = st.number_input("Point 1 - X coordinate", min_value=0, max_value=display_image.shape[1], value=100, key="manual_x1_click")
-                    y1 = st.number_input("Point 1 - Y coordinate", min_value=0, max_value=display_image.shape[0], value=100, key="manual_y1_click")
-                    
-                    if st.button("Set Point 1", key="set_point1"):
-                        st.session_state.manual_click_points = [(int(x1), int(y1))]
-                        st.rerun()
-                        
-                elif len(st.session_state.manual_click_points) == 1:
-                    st.write(f"Point 1: {st.session_state.manual_click_points[0]}")
-                    x2 = st.number_input("Point 2 - X coordinate", min_value=0, max_value=display_image.shape[1], value=200, key="manual_x2_click")
-                    y2 = st.number_input("Point 2 - Y coordinate", min_value=0, max_value=display_image.shape[0], value=200, key="manual_y2_click")
-                    
-                    if st.button("Set Point 2", key="set_point2"):
-                        st.session_state.manual_click_points.append((int(x2), int(y2)))
-                        st.rerun()
-                
-                else:
-                    st.write(f"Point 1: {st.session_state.manual_click_points[0]}")
-                    st.write(f"Point 2: {st.session_state.manual_click_points[1]}")
+                st.markdown("**Start Point:**")
+                x1 = st.number_input("X1", min_value=0, max_value=display_image.shape[1], value=100, key="manual_x1")
+                y1 = st.number_input("Y1", min_value=0, max_value=display_image.shape[0], value=100, key="manual_y1")
             
             with col2:
-                st.markdown("**Controls:**")
-                
-                # Reset drawing button
-                if st.button("🔄 Restart Drawing", key="restart_manual_drawing"):
-                    st.session_state.manual_click_points = []
-                    st.session_state.manual_measurement_complete = False
+                st.markdown("**End Point:**")
+                x2 = st.number_input("X2", min_value=0, max_value=display_image.shape[1], value=300, key="manual_x2")
+                y2 = st.number_input("Y2", min_value=0, max_value=display_image.shape[0], value=200, key="manual_y2")
+            
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                if st.button("📏 Set Line Coordinates", key="set_manual_line"):
+                    st.session_state.manual_line_coords = (int(x1), int(y1), int(x2), int(y2))
+                    st.session_state.manual_line_drawn = True
+                    st.rerun()
+            
+            with col_btn2:
+                if st.button("🔄 Clear All Lines", key="clear_manual_line"):
+                    st.session_state.manual_line_coords = None
+                    st.session_state.manual_line_drawn = False
                     st.rerun()
                 
-                # Known distance input (only show if both points are set)
-                if len(st.session_state.manual_click_points) >= 2:
-                    st.markdown("**Enter known distance:**")
-                    # Initialize known distance if not set
+            
+            # Measurement input section (show if line is drawn)
+            if st.session_state.manual_line_coords:
+                st.markdown("---")
+                st.markdown("### 📏 Set Known Distance")
+                
+                x1, y1, x2, y2 = st.session_state.manual_line_coords
+                pixel_distance = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+                
+                st.info(f"**Line drawn:** {pixel_distance:.1f} pixels long")
+                
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    # Initialize measurement values
                     if 'manual_known_distance' not in st.session_state:
                         st.session_state.manual_known_distance = 50.0
-                        
+                    if 'manual_measurement_unit' not in st.session_state:
+                        st.session_state.manual_measurement_unit = "micrometers"
+                    
+                    # Unit selection
+                    unit = st.selectbox(
+                        "Measurement unit:",
+                        ["micrometers (μm)", "millimeters (mm)"],
+                        index=0 if st.session_state.manual_measurement_unit == "micrometers" else 1,
+                        key="manual_unit_select"
+                    )
+                    st.session_state.manual_measurement_unit = "micrometers" if "micrometers" in unit else "millimeters"
+                    
+                    # Distance input
+                    unit_symbol = "μm" if st.session_state.manual_measurement_unit == "micrometers" else "mm"
+                    max_val = 10000.0 if st.session_state.manual_measurement_unit == "micrometers" else 100.0
+                    step_val = 0.1 if st.session_state.manual_measurement_unit == "micrometers" else 0.01
+                    
                     known_distance = st.number_input(
-                        "Known distance (μm)",
-                        min_value=0.1,
-                        max_value=10000.0,
+                        f"Known distance ({unit_symbol}):",
+                        min_value=0.001,
+                        max_value=max_val,
                         value=st.session_state.manual_known_distance,
-                        step=0.1,
-                        help="The actual distance between these two points in micrometers"
+                        step=step_val,
+                        help=f"The actual distance of your drawn line in {st.session_state.manual_measurement_unit}"
                     )
                     st.session_state.manual_known_distance = known_distance
-                    
-                    # Calculate current distance in pixels
-                    point1 = st.session_state.manual_click_points[0]
-                    point2 = st.session_state.manual_click_points[1]
-                    pixel_distance = np.sqrt((point2[0] - point1[0])**2 + (point2[1] - point1[1])**2)
-                    
-                    st.info(f"**Distance in pixels:** {pixel_distance:.1f}px")
-                    
-                    # Apply calibration button
-                    if st.button("🎯 Apply Calibration", type="primary", key="apply_manual_calibration"):
-                        if pixel_distance > 0 and known_distance > 0:
-                            # Use calibration.py manual_calibration method
-                            calibration_result = st.session_state.calibration.manual_calibration(
-                                st.session_state.original_image, point1, point2, known_distance
-                            )
+                
+                with col2:
+                    st.markdown("**Line Info:**")
+                    st.write(f"Start: ({x1}, {y1})")
+                    st.write(f"End: ({x2}, {y2})")
+                    st.write(f"Length: {pixel_distance:.1f}px")
+                
+                # Apply calibration button
+                if st.button("🎯 Apply Calibration", type="primary", key="apply_manual_calibration"):
+                    if pixel_distance > 0 and known_distance > 0:
+                        # Convert to micrometers if needed
+                        distance_um = known_distance if st.session_state.manual_measurement_unit == "micrometers" else known_distance * 1000
+                        
+                        # Use calibration.py manual_calibration method
+                        point1 = (x1, y1)
+                        point2 = (x2, y2)
+                        calibration_result = st.session_state.calibration.manual_calibration(
+                            st.session_state.original_image, point1, point2, distance_um
+                        )
+                        
+                        if calibration_result:
+                            st.session_state.pixel_scale = calibration_result['pixel_scale']
+                            st.session_state.calibration_complete = True
+                            st.session_state.manual_calibration_complete = True
+                            st.session_state.manual_calibration_visualization = calibration_result['visualization']
                             
-                            if calibration_result:
-                                st.session_state.pixel_scale = calibration_result['pixel_scale']
-                                st.session_state.calibration_complete = True
-                                st.session_state.manual_calibration_complete = True
-                                st.session_state.manual_calibration_visualization = calibration_result['visualization']
-                                st.success(f"✅ Manual calibration successful! Pixel scale: {calibration_result['pixel_scale']:.2f} μm/pixel")
-                                st.rerun()
-                            else:
-                                st.error("❌ Calibration failed. Please try again.")
+                            unit_display = f"{known_distance} {unit_symbol}"
+                            st.success(f"✅ Manual calibration successful!")
+                            st.success(f"📏 {unit_display} = {pixel_distance:.1f} pixels")
+                            st.success(f"🔬 Pixel scale: {calibration_result['pixel_scale']:.2f} μm/pixel")
+                            st.rerun()
                         else:
-                            st.error("❌ Invalid measurements. Please ensure both distance values are positive.")
-                            
+                            st.error("❌ Calibration failed. Please try again.")
+                    else:
+                        st.error("❌ Invalid measurements. Please ensure both distance values are positive.")
+                        
             # Display calibration results if available
             if st.session_state.get('manual_calibration_complete', False) and 'manual_calibration_visualization' in st.session_state:
+                st.markdown("---")
                 st.markdown("### ✅ Calibration Results")
                 st.image(st.session_state.manual_calibration_visualization, 
                         caption=f"Manual measurement calibration - Scale: {st.session_state.pixel_scale:.2f} μm/pixel", 
