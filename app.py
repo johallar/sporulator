@@ -681,89 +681,95 @@ def main():
                 num_divisions = st.session_state.get('manual_num_divisions', 5)
                 um_per_division = st.session_state.get('manual_um_per_division', 10.0)
                 
-                # Import drawable canvas
-                from streamlit_drawable_canvas import st_canvas
-                
-                # Convert image for canvas
+                # Convert image for display
                 if len(st.session_state.original_image.shape) == 3:
-                    canvas_image = Image.fromarray(st.session_state.original_image)
+                    display_image = st.session_state.original_image.copy()
                 else:
-                    canvas_image = Image.fromarray(cv2.cvtColor(st.session_state.original_image, cv2.COLOR_GRAY2RGB))
-                
-                # Calculate display size for better drawing experience in main area
-                img_width, img_height = canvas_image.size
-                max_width = 1000  # Larger than sidebar version for better usability
-                if img_width > max_width:
-                    scale_factor = max_width / img_width
-                    display_width = max_width
-                    display_height = int(img_height * scale_factor)
-                else:
-                    display_width = img_width
-                    display_height = img_height
-                    scale_factor = 1.0
+                    display_image = cv2.cvtColor(st.session_state.original_image, cv2.COLOR_GRAY2RGB)
                 
                 # Instructions
-                st.markdown(f"**Instructions:** Draw a line across {num_divisions} division(s) on your scale. Each division = {um_per_division:.1f} μm")
+                st.markdown(f"**Instructions:** Enter coordinates of two points that span {num_divisions} division(s) on your scale. Each division = {um_per_division:.1f} μm")
                 
-                # Create canvas for drawing - larger and more usable than sidebar version
-                canvas_result = st_canvas(
-                    fill_color="rgba(0, 0, 0, 0)",  # Transparent fill
-                    stroke_width=4,  # Slightly thicker for visibility
-                    stroke_color="#00FF00",  # Bright green line
-                    background_image=canvas_image,
-                    update_streamlit=True,
-                    width=display_width,
-                    height=display_height,
-                    drawing_mode="line",
-                    point_display_radius=6,
-                    key="manual_measurement_canvas_main",
-                    display_toolbar=True
-                )
+                # Display the image first for reference
+                st.image(display_image, caption="Reference image - use this to identify pixel coordinates", use_column_width=True)
                 
-                # Process drawn line
-                if canvas_result.json_data is not None:
-                    objects = canvas_result.json_data["objects"]
-                    lines = [obj for obj in objects if obj["type"] == "line"]
+                # Coordinate input method (more reliable than problematic canvas)
+                st.write("**Enter the pixel coordinates of two measurement points:**")
+                
+                # Initialize coordinate inputs
+                if 'manual_x1' not in st.session_state:
+                    st.session_state.manual_x1 = 100
+                if 'manual_y1' not in st.session_state:
+                    st.session_state.manual_y1 = 100
+                if 'manual_x2' not in st.session_state:
+                    st.session_state.manual_x2 = 300
+                if 'manual_y2' not in st.session_state:
+                    st.session_state.manual_y2 = 100
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write("**Point 1 (start):**")
+                    x1 = st.number_input("X1 coordinate", min_value=0, max_value=display_image.shape[1], 
+                                        value=st.session_state.manual_x1, key="manual_x1_input")
+                    y1 = st.number_input("Y1 coordinate", min_value=0, max_value=display_image.shape[0], 
+                                        value=st.session_state.manual_y1, key="manual_y1_input")
+                
+                with col2:
+                    st.write("**Point 2 (end):**")
+                    x2 = st.number_input("X2 coordinate", min_value=0, max_value=display_image.shape[1], 
+                                        value=st.session_state.manual_x2, key="manual_x2_input")
+                    y2 = st.number_input("Y2 coordinate", min_value=0, max_value=display_image.shape[0], 
+                                        value=st.session_state.manual_y2, key="manual_y2_input")
+                
+                # Update session state
+                st.session_state.manual_x1 = x1
+                st.session_state.manual_y1 = y1
+                st.session_state.manual_x2 = x2
+                st.session_state.manual_y2 = y2
+                
+                # Calculate pixel distance
+                pixel_distance = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+                
+                # Calculate total micrometers measured
+                total_um = num_divisions * um_per_division
+                
+                # Show visualization with measurement line
+                if pixel_distance > 0:
+                    vis_image = display_image.copy()
+                    cv2.line(vis_image, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 3)
+                    cv2.circle(vis_image, (int(x1), int(y1)), 6, (0, 255, 0), -1)
+                    cv2.circle(vis_image, (int(x2), int(y2)), 6, (0, 255, 0), -1)
                     
-                    if lines:
-                        # Use the last drawn line
-                        line = lines[-1]
+                    # Add text labels
+                    cv2.putText(vis_image, "1", (int(x1)+10, int(y1)-10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    cv2.putText(vis_image, "2", (int(x2)+10, int(y2)-10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    
+                    st.image(vis_image, caption="Measurement line preview", use_column_width=True)
+                    
+                    # Show measurement info
+                    col_measurement, col_button = st.columns([3, 1])
+                    with col_measurement:
+                        st.info(f"📏 Distance: {pixel_distance:.1f} pixels across {total_um:.1f} μm ({num_divisions} × {um_per_division:.1f} μm)")
+                    
+                    # Calculate and apply pixel scale
+                    if total_um > 0 and pixel_distance > 5:  # Minimum distance
+                        calculated_scale = pixel_distance / total_um
                         
-                        # Get line coordinates and scale them back to original image size
-                        x1 = line["x1"] / scale_factor
-                        y1 = line["y1"] / scale_factor
-                        x2 = line["x2"] / scale_factor
-                        y2 = line["y2"] / scale_factor
+                        with col_button:
+                            if st.button("✅ Apply Calibration", type="primary"):
+                                st.session_state.pixel_scale = calculated_scale
+                                st.session_state.manual_calibration_complete = True
+                                st.session_state.calibration_complete = True
+                                st.success(f"🎯 Calibration applied! Scale: {calculated_scale:.2f} pixels/μm")
+                                st.rerun()
                         
-                        # Calculate pixel distance
-                        pixel_distance = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
-                        
-                        # Calculate total micrometers measured
-                        total_um = num_divisions * um_per_division
-                        
-                        # Show measurement info
-                        col_measurement, col_button = st.columns([3, 1])
-                        with col_measurement:
-                            st.info(f"📏 Line drawn: {pixel_distance:.1f} pixels across {total_um:.1f} μm ({num_divisions} × {um_per_division:.1f} μm)")
-                        
-                        # Calculate and apply pixel scale
-                        if total_um > 0 and pixel_distance > 0:
-                            calculated_scale = pixel_distance / total_um
-                            
-                            with col_button:
-                                if st.button("✅ Apply Calibration", type="primary"):
-                                    st.session_state.pixel_scale = calculated_scale
-                                    st.session_state.manual_calibration_complete = True
-                                    st.session_state.calibration_complete = True  # Fix: set the main calibration flag
-                                    st.success(f"🎯 Calibration applied! Scale: {calculated_scale:.2f} pixels/μm")
-                                    st.rerun()
-                            
-                            # Preview the calculated scale
-                            st.success(f"🎯 Calculated scale: {calculated_scale:.2f} pixels/μm (click Apply to use)")
-                        else:
-                            st.warning("Please ensure your measurement parameters are valid")
+                        # Preview the calculated scale
+                        st.success(f"🎯 Calculated scale: {calculated_scale:.2f} pixels/μm (click Apply to use)")
                     else:
-                        st.info("👆 Draw a line on the image above to measure")
+                        if pixel_distance <= 5:
+                            st.warning("⚠️ Points are too close together for accurate measurement")
+                        else:
+                            st.warning("⚠️ Please ensure your measurement parameters are valid")
                         
                 st.markdown("---")  # Visual separator
 
