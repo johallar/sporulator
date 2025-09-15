@@ -130,7 +130,7 @@ def main():
         # Calibration method selection
         calibration_method = st.selectbox(
             "Calibration Method", [
-                "Manual Entry", "Auto-Detect Micrometer Divisions"
+                "Manual Entry", "Auto-Detect Micrometer Divisions", "Manual Measurement"
             ],
             help="Choose how to determine the pixel scale")
 
@@ -161,6 +161,117 @@ def main():
             
             pixel_scale = st.session_state.get('pixel_scale', 10.0)
             st.info(f"Current pixel scale: {pixel_scale:.2f} pixels/μm")
+
+        elif calibration_method == "Manual Measurement":
+            st.info(
+                "📐 Draw a measurement line on your image to manually calibrate the pixel scale"
+            )
+            
+            # Input fields for measurement
+            col_a, col_b = st.columns(2)
+            with col_a:
+                num_divisions = st.number_input(
+                    "Number of divisions covered",
+                    min_value=1,
+                    max_value=100,
+                    value=5,
+                    step=1,
+                    help="How many scale divisions does your measurement span?")
+            
+            with col_b:
+                um_per_division = st.number_input(
+                    "Micrometers per division (μm)",
+                    min_value=0.1,
+                    max_value=1000.0,
+                    value=10.0,
+                    step=0.1,
+                    help="The distance each scale division represents")
+            
+            # Initialize manual measurement session state
+            if 'manual_measurement_points' not in st.session_state:
+                st.session_state.manual_measurement_points = []
+            if 'manual_calibration_complete' not in st.session_state:
+                st.session_state.manual_calibration_complete = False
+            
+            # Show the image for measurement
+            if st.session_state.original_image is not None:
+                st.write("**Draw a line on the image to measure a known distance:**")
+                
+                # Import drawable canvas
+                from streamlit_drawable_canvas import st_canvas
+                
+                # Convert image for canvas
+                if len(st.session_state.original_image.shape) == 3:
+                    canvas_image = Image.fromarray(st.session_state.original_image)
+                else:
+                    canvas_image = Image.fromarray(cv2.cvtColor(st.session_state.original_image, cv2.COLOR_GRAY2RGB))
+                
+                # Calculate display size (limit to reasonable size for drawing)
+                img_width, img_height = canvas_image.size
+                max_width = 800
+                if img_width > max_width:
+                    scale_factor = max_width / img_width
+                    display_width = max_width
+                    display_height = int(img_height * scale_factor)
+                else:
+                    display_width = img_width
+                    display_height = img_height
+                    scale_factor = 1.0
+                
+                # Create canvas for drawing
+                canvas_result = st_canvas(
+                    fill_color="rgba(255, 0, 0, 0.3)",  # Transparent red fill
+                    stroke_width=3,
+                    stroke_color="#00FF00",  # Green line
+                    background_image=canvas_image,
+                    update_streamlit=True,
+                    width=display_width,
+                    height=display_height,
+                    drawing_mode="line",
+                    point_display_radius=5,
+                    key="manual_measurement_canvas",
+                )
+                
+                # Check if user has drawn a line
+                if canvas_result.json_data is not None:
+                    objects = canvas_result.json_data["objects"]
+                    lines = [obj for obj in objects if obj["type"] == "line"]
+                    
+                    if lines:
+                        # Use the last drawn line
+                        line = lines[-1]
+                        
+                        # Get line coordinates and scale them back to original image size
+                        x1 = line["x1"] / scale_factor
+                        y1 = line["y1"] / scale_factor
+                        x2 = line["x2"] / scale_factor
+                        y2 = line["y2"] / scale_factor
+                        
+                        # Calculate pixel distance
+                        pixel_distance = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+                        
+                        # Calculate total micrometers measured
+                        total_um = num_divisions * um_per_division
+                        
+                        # Calculate pixel scale
+                        if total_um > 0 and pixel_distance > 0:
+                            pixel_scale = pixel_distance / total_um
+                            st.session_state.pixel_scale = pixel_scale
+                            st.session_state.manual_calibration_complete = True
+                            
+                            st.success(f"✅ Measurement complete! Pixel scale: {pixel_scale:.2f} pixels/μm")
+                            st.info(f"Measured {pixel_distance:.1f} pixels = {total_um:.1f} μm ({num_divisions} divisions × {um_per_division:.1f} μm)")
+                        else:
+                            st.warning("Please ensure your inputs are valid and draw a line on the image")
+                            pixel_scale = st.session_state.get('pixel_scale', 10.0)
+                    else:
+                        st.write("Draw a line across the known measurement")
+                        pixel_scale = st.session_state.get('pixel_scale', 10.0)
+                else:
+                    pixel_scale = st.session_state.get('pixel_scale', 10.0)
+            else:
+                st.warning("Please upload an image first")
+                pixel_scale = st.session_state.get('pixel_scale', 10.0)
 
         else:
             # For any other methods, use default pixel scale
