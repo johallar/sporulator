@@ -684,34 +684,6 @@ def render_step_2_calibration():
                         st.session_state.manual_line_drawn = False
                         st.rerun()
             
-            # Alternative input method for precise coordinates
-            st.markdown("---")
-            st.markdown("**Alternative: Enter coordinates manually**")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("**Start Point:**")
-                x1 = st.number_input("X1", min_value=0, max_value=display_image.shape[1], value=100, key="manual_x1")
-                y1 = st.number_input("Y1", min_value=0, max_value=display_image.shape[0], value=100, key="manual_y1")
-            
-            with col2:
-                st.markdown("**End Point:**")
-                x2 = st.number_input("X2", min_value=0, max_value=display_image.shape[1], value=300, key="manual_x2")
-                y2 = st.number_input("Y2", min_value=0, max_value=display_image.shape[0], value=200, key="manual_y2")
-            
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                if st.button("📏 Set Line Coordinates", key="set_manual_line"):
-                    st.session_state.manual_line_coords = (int(x1), int(y1), int(x2), int(y2))
-                    st.session_state.manual_line_drawn = True
-                    st.rerun()
-            
-            with col_btn2:
-                if st.button("🔄 Clear All Lines", key="clear_manual_line"):
-                    st.session_state.manual_line_coords = None
-                    st.session_state.manual_line_drawn = False
-                    st.rerun()
                 
             
             # Measurement input section (show if line is drawn)
