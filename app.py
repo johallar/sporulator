@@ -9,7 +9,7 @@ import io
 import base64
 import requests
 import re
-from streamlit_drawable_canvas import st_canvas
+# Canvas functionality will be implemented with Plotly
 from spore_analyzer import SporeAnalyzer
 from utils import calculate_statistics, create_overlay_image, export_results, generate_mycological_summary
 from calibration import StageCalibration
@@ -492,46 +492,105 @@ def render_step_2_calibration():
             display_image = np.array(st.session_state.display_image.copy())
             
             # Create the canvas
-            canvas_result = st_canvas(
-                fill_color="rgba(255, 165, 0, 0.3)",
-                stroke_width=4,
-                stroke_color="#00FF00",  # Lime green
-                background_color="#000000",
-                background_image=st.session_state.display_image,
-                update_streamlit=True,
-                height=min(600, display_image.shape[0]),
-                width=min(700, display_image.shape[1]),
-                drawing_mode="line",
-                point_display_radius=8,
-                display_toolbar=True,
-                key="manual_measurement_canvas",
+            # Create interactive Plotly figure for line drawing
+            import plotly.graph_objects as go
+            
+            # Setup figure with image background
+            fig = go.Figure()
+            
+            # Convert PIL image to base64 for Plotly
+            import io
+            import base64
+            img_buffer = io.BytesIO()
+            st.session_state.display_image.save(img_buffer, format='PNG')
+            img_base64 = base64.b64encode(img_buffer.getvalue()).decode()
+            
+            # Add background image
+            fig.add_layout_image(
+                dict(
+                    source=f"data:image/png;base64,{img_base64}",
+                    xref="x",
+                    yref="y",
+                    x=0,
+                    y=0,
+                    sizex=display_image.shape[1],
+                    sizey=display_image.shape[0],
+                    sizing="stretch",
+                    opacity=1,
+                    layer="below"
+                )
             )
             
-            # Extract line coordinates when drawn
-            if canvas_result.json_data is not None and "objects" in canvas_result.json_data:
-                objects = canvas_result.json_data["objects"]
-                if objects:
-                    # Get the most recent line (last object)
-                    line_obj = objects[-1]
-                    if line_obj["type"] == "line":
-                        # Get canvas dimensions and scale factors
-                        canvas_width = min(700, display_image.shape[1])
-                        canvas_height = min(600, display_image.shape[0])
-                        scale_x = display_image.shape[1] / canvas_width
-                        scale_y = display_image.shape[0] / canvas_height
-                        
-                        # Extract line coordinates and scale to original image size
-                        x1 = int((line_obj["x1"] + line_obj["left"]) * scale_x)
-                        y1 = int((line_obj["y1"] + line_obj["top"]) * scale_y)
-                        x2 = int((line_obj["x2"] + line_obj["left"]) * scale_x)
-                        y2 = int((line_obj["y2"] + line_obj["top"]) * scale_y)
-                        
-                        # Store coordinates in session state
-                        new_coords = (x1, y1, x2, y2)
-                        if st.session_state.manual_line_coords != new_coords:
-                            st.session_state.manual_line_coords = new_coords
-                            st.session_state.manual_line_drawn = True
-                            st.rerun()
+            # Add existing line if it exists
+            if st.session_state.manual_line_coords:
+                x1, y1, x2, y2 = st.session_state.manual_line_coords
+                fig.add_trace(go.Scatter(
+                    x=[x1, x2],
+                    y=[y1, y2],
+                    mode='lines+markers',
+                    line=dict(color='lime', width=4),
+                    marker=dict(size=10, color='lime'),
+                    name='Measurement Line',
+                    showlegend=False
+                ))
+            
+            # Configure layout for drawing
+            fig.update_layout(
+                title="🖱️ Click two points to draw a measurement line",
+                xaxis=dict(
+                    range=[0, display_image.shape[1]],
+                    title="X coordinate (pixels)",
+                    showgrid=True,
+                    gridcolor='rgba(255,255,255,0.3)'
+                ),
+                yaxis=dict(
+                    range=[display_image.shape[0], 0],  # Flip Y axis for image coordinates
+                    title="Y coordinate (pixels)",
+                    showgrid=True,
+                    gridcolor='rgba(255,255,255,0.3)',
+                    scaleanchor="x",
+                    scaleratio=1
+                ),
+                width=min(700, display_image.shape[1]),
+                height=min(600, display_image.shape[0]),
+                showlegend=False,
+                margin=dict(l=50, r=50, t=50, b=50)
+            )
+            
+            # Display the interactive plot
+            selected_data = st.plotly_chart(fig, use_container_width=False, key="measurement_plot")
+            
+            # Instructions for line drawing
+            st.info("📌 **Click two points on the image above to draw a measurement line**")
+            
+            # Initialize click points if not exist
+            if 'manual_click_points' not in st.session_state:
+                st.session_state.manual_click_points = []
+            
+            # Manual coordinate input section (since Plotly click capture in Streamlit is limited)
+            with st.expander("✏️ Manual Coordinate Entry", expanded=not st.session_state.manual_line_coords):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("**📍 Start Point:**")
+                    x1_input = st.number_input("X1 (pixels)", min_value=0, max_value=display_image.shape[1], value=100, key="manual_x1_new")
+                    y1_input = st.number_input("Y1 (pixels)", min_value=0, max_value=display_image.shape[0], value=100, key="manual_y1_new")
+                
+                with col2:
+                    st.markdown("**📍 End Point:**")
+                    x2_input = st.number_input("X2 (pixels)", min_value=0, max_value=display_image.shape[1], value=300, key="manual_x2_new")
+                    y2_input = st.number_input("Y2 (pixels)", min_value=0, max_value=display_image.shape[0], value=200, key="manual_y2_new")
+                
+                col_draw, col_clear = st.columns(2)
+                with col_draw:
+                    if st.button("📏 Draw Line", type="primary", key="draw_line_btn"):
+                        st.session_state.manual_line_coords = (int(x1_input), int(y1_input), int(x2_input), int(y2_input))
+                        st.rerun()
+                
+                with col_clear:
+                    if st.button("🗑️ Clear Line", key="clear_line_btn"):
+                        st.session_state.manual_line_coords = None
+                        st.rerun()
             
             # Canvas drawing instructions
             st.info("🖱️ **Instructions:** Use the line tool from the canvas toolbar above to click and drag a measurement line across a known distance on your image.")
