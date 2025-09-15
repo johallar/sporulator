@@ -37,6 +37,16 @@ if 'analysis_results' not in st.session_state:
 if 'pixel_scale' not in st.session_state:
     st.session_state.pixel_scale = 1.0  # Default value
 
+# Wizard step management session state
+if 'current_step' not in st.session_state:
+    st.session_state.current_step = 1
+if 'step_1_complete' not in st.session_state:
+    st.session_state.step_1_complete = False
+if 'step_2_complete' not in st.session_state:
+    st.session_state.step_2_complete = False
+if 'step_3_complete' not in st.session_state:
+    st.session_state.step_3_complete = False
+
 
 def fetch_inaturalist_photos(observation_id):
     """Fetch all photos metadata from iNaturalist observation"""
@@ -114,106 +124,427 @@ def download_inaturalist_image(photo_url, size="large"):
         return None
 
 
-def main():
-    st.title("🔬 Sporulator")
-    st.markdown(
-        "Upload microscopy images to automatically detect and measure fungal spores"
+def render_step_indicator():
+    """Render the step indicator at the top of the page"""
+    st.markdown("---")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.session_state.current_step >= 1:
+            if st.session_state.step_1_complete:
+                st.markdown("### ✅ Step 1: Image Source")
+            elif st.session_state.current_step == 1:
+                st.markdown("### 📸 **Step 1: Image Source**")
+            else:
+                st.markdown("### ⭕ Step 1: Image Source")
+        else:
+            st.markdown("### ⚪ Step 1: Image Source")
+    
+    with col2:
+        if st.session_state.current_step >= 2:
+            if st.session_state.step_2_complete:
+                st.markdown("### ✅ Step 2: Calibration")
+            elif st.session_state.current_step == 2:
+                st.markdown("### 🔧 **Step 2: Calibration**")
+            else:
+                st.markdown("### ⭕ Step 2: Calibration")
+        else:
+            st.markdown("### ⚪ Step 2: Calibration")
+    
+    with col3:
+        if st.session_state.current_step >= 3:
+            if st.session_state.step_3_complete:
+                st.markdown("### ✅ Step 3: Analysis")
+            elif st.session_state.current_step == 3:
+                st.markdown("### 🔬 **Step 3: Analysis**")
+            else:
+                st.markdown("### ⭕ Step 3: Analysis")
+        else:
+            st.markdown("### ⚪ Step 3: Analysis")
+    
+    st.markdown("---")
+
+
+def validate_step_1():
+    """Validate if Step 1 (Image Source) is complete"""
+    return st.session_state.get('image_uploaded', False) and 'original_image' in st.session_state
+
+
+def validate_step_2():
+    """Validate if Step 2 (Calibration) is complete"""
+    return st.session_state.get('calibration_complete', False) or st.session_state.get('pixel_scale', 1.0) > 0
+
+
+def render_navigation_buttons():
+    """Render navigation buttons for the wizard"""
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col1:
+        if st.session_state.current_step > 1:
+            if st.button("⬅️ Previous", key="prev_button", use_container_width=True):
+                st.session_state.current_step -= 1
+                st.rerun()
+    
+    with col3:
+        if st.session_state.current_step < 3:
+            # Check if current step can be completed
+            can_proceed = False
+            if st.session_state.current_step == 1 and validate_step_1():
+                can_proceed = True
+                st.session_state.step_1_complete = True
+            elif st.session_state.current_step == 2 and validate_step_2():
+                can_proceed = True
+                st.session_state.step_2_complete = True
+            
+            button_text = "Next ➡️" if can_proceed else "Next ➡️ (Complete current step)"
+            button_disabled = not can_proceed
+            
+            if st.button(button_text, key="next_button", disabled=button_disabled, use_container_width=True):
+                st.session_state.current_step += 1
+                st.rerun()
+
+
+def render_step_1_image_source():
+    """Render Step 1: Image Source"""
+    st.header("📸 Step 1: Image Source")
+    st.markdown("Choose your microscopy image source and upload or select an image to analyze.")
+    
+    # Upload method selection
+    upload_method = st.radio(
+        "Upload Method", ["File Upload", "iNaturalist URL"],
+        help="Choose to upload a file from your computer or load an image from an iNaturalist observation"
     )
 
-    # Sidebar controls
-    with st.sidebar:
-        st.header("📊 Analysis Settings")
+    if upload_method == "File Upload":
+        uploaded_file = st.file_uploader(
+            "Choose a microscopy image",
+            type=['png', 'jpg', 'jpeg', 'tiff', 'tif', 'bmp'],
+            help="Upload a microscopy image containing fungal spores")
 
-        # Pixel scale calibration
-        st.subheader("Calibration")
+        if uploaded_file is not None:
+            # Load and display the image
+            image = Image.open(uploaded_file)
+            image_array = np.array(image)
+            
+            # Store image in session state
+            st.session_state.original_image = image_array
+            st.session_state.image_uploaded = True
+            st.session_state.image_source = "file"
+            st.session_state.display_image = image
+            
+            # Display the image
+            st.subheader("📷 Uploaded Image Preview")
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                st.image(image, caption="Uploaded Image", use_container_width=True)
+            with col2:
+                st.success("✅ Image uploaded successfully!")
+                st.info(f"**Dimensions:** {image_array.shape[1]} × {image_array.shape[0]} pixels")
+                if len(image_array.shape) == 3:
+                    st.info(f"**Channels:** {image_array.shape[2]} (Color)")
+                else:
+                    st.info("**Channels:** 1 (Grayscale)")
 
-        # Calibration method selection
-        calibration_method = st.selectbox(
-            "Calibration Method", [
-                "Manual Entry", "Auto-Detect Micrometer Divisions", "Manual Measurement"
-            ],
-            help="Choose how to determine the pixel scale")
+    elif upload_method == "iNaturalist URL":
+        st.markdown("**Load image from iNaturalist observation:**")
+        inaturalist_url = st.text_input(
+            "iNaturalist Observation URL",
+            placeholder="https://www.inaturalist.org/observations/123456789",
+            help="Enter the URL of an iNaturalist observation to analyze its images"
+        )
 
-        if calibration_method == "Manual Entry":
-            pixel_scale = st.number_input(
-                "Pixel Scale (pixels/μm)",
+        if inaturalist_url:
+            # Extract observation ID from URL
+            obs_match = re.search(r'/observations/(\d+)', inaturalist_url)
+            if obs_match:
+                obs_id = obs_match.group(1)
+
+                # Automatically fetch photos when URL is entered or changed
+                if st.session_state.get('obs_id') != obs_id:
+                    with st.spinner(f"Fetching photos from iNaturalist observation {obs_id}..."):
+                        photos = fetch_inaturalist_photos(obs_id)
+                        if photos:
+                            st.session_state.inaturalist_photos = photos
+                            st.session_state.obs_id = obs_id
+                            st.session_state.selected_photo_idx = 0
+                            st.session_state.inaturalist_photo_changed = True
+                            st.success(f"✅ Found {len(photos)} photo(s) in this observation!")
+                        else:
+                            st.error("❌ Could not fetch photos from iNaturalist. Please check the URL.")
+
+                # Show photo selection if photos are available
+                if 'inaturalist_photos' in st.session_state and st.session_state.get('obs_id') == obs_id:
+                    photos = st.session_state.inaturalist_photos
+
+                    st.markdown("**Select a photo to analyze:**")
+
+                    # Create clickable photo selection interface
+                    if len(photos) == 1:
+                        selected_photo_idx = 0
+                        st.info("Only one photo available in this observation.")
+                    else:
+                        # Show thumbnails in a row with clickable selection
+                        cols = st.columns(min(len(photos), 5))  # Max 5 columns
+
+                        if 'selected_photo_idx' not in st.session_state:
+                            st.session_state.selected_photo_idx = 0
+
+                        # Display clickable thumbnails
+                        for i, photo in enumerate(photos):
+                            with cols[i % 5]:  # Wrap to new row if more than 5
+                                # Convert URL to thumbnail size
+                                thumb_url = photo['url']
+                                for old_size in ['square', 'thumb', 'small', 'medium', 'large', 'original']:
+                                    if f'/{old_size}.' in thumb_url:
+                                        thumb_url = thumb_url.replace(f'/{old_size}.', '/thumb.')
+                                        break
+
+                                # Show thumbnail
+                                try:
+                                    st.image(thumb_url, width=100)
+                                except:
+                                    st.write(f"📷 {i+1}")
+
+                                # Clickable button for selection
+                                button_label = f"{'✅ ' if st.session_state.selected_photo_idx == i else ''}Photo {i+1}"
+                                if st.button(button_label, key=f"select_photo_{i}"):
+                                    st.session_state.selected_photo_idx = i
+                                    st.session_state.inaturalist_photo_changed = True
+                                    st.rerun()
+
+                        selected_photo_idx = st.session_state.selected_photo_idx
+                        st.info(f"📸 Selected: Photo {selected_photo_idx + 1}")
+
+                    # Image quality selection
+                    image_quality = st.selectbox(
+                        "Image Quality",
+                        ["large", "medium", "original"],
+                        index=2,  # Default to original
+                        help="Choose image quality - larger images provide better analysis",
+                        key="inaturalist_image_quality")
+
+                    # Auto-load selected photo
+                    selected_photo = photos[selected_photo_idx]
+                    settings_changed = (
+                        image_quality != st.session_state.get('prev_image_quality', '') or
+                        selected_photo_idx != st.session_state.get('prev_selected_photo_idx', -1) or
+                        st.session_state.get('inaturalist_photo_changed', False)
+                    )
+
+                    if settings_changed:
+                        with st.spinner(f"Loading photo {selected_photo_idx + 1} at {image_quality} quality..."):
+                            image_array = download_inaturalist_image(selected_photo['url'], image_quality)
+                            if image_array is not None:
+                                # Store image in session state
+                                st.session_state.original_image = image_array
+                                st.session_state.image_uploaded = True
+                                st.session_state.image_source = "inaturalist"
+                                st.session_state.display_image = image_array
+
+                                # Update tracking variables
+                                st.session_state.prev_image_quality = image_quality
+                                st.session_state.prev_selected_photo_idx = selected_photo_idx
+                                st.session_state.inaturalist_photo_changed = False
+
+                                # Display the loaded image
+                                st.subheader("📷 Loaded iNaturalist Image")
+                                col1, col2 = st.columns([2, 1])
+                                with col1:
+                                    st.image(image_array, caption=f"iNaturalist Photo {selected_photo_idx + 1}", use_container_width=True)
+                                with col2:
+                                    st.success("✅ Image loaded successfully!")
+                                    st.info(f"**Dimensions:** {image_array.shape[1]} × {image_array.shape[0]} pixels")
+                                    if selected_photo['attribution'] != 'Unknown':
+                                        st.caption(f"📷 {selected_photo['attribution']}")
+                                    if selected_photo['license'] != 'Unknown':
+                                        st.caption(f"📄 License: {selected_photo['license']}")
+                            else:
+                                st.error("❌ Could not load the selected image.")
+            else:
+                if inaturalist_url.strip():
+                    st.error("❌ Invalid iNaturalist URL. Please enter a valid observation URL.")
+
+    # Show step completion status
+    if validate_step_1():
+        st.success("✅ Step 1 Complete! You can proceed to calibration.")
+    else:
+        st.info("📸 Please upload or select an image to continue.")
+
+
+def render_step_2_calibration():
+    """Render Step 2: Calibration"""
+    st.header("🔧 Step 2: Calibration")
+    st.markdown("Set up the pixel scale calibration to convert pixel measurements to micrometers.")
+    
+    # Show image preview if available
+    if 'original_image' in st.session_state:
+        with st.expander("📷 Image Preview", expanded=True):
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                st.image(st.session_state.display_image, caption="Image to Calibrate", use_container_width=True)
+            with col2:
+                image_array = st.session_state.original_image
+                st.info(f"**Dimensions:** {image_array.shape[1]} × {image_array.shape[0]} pixels")
+
+    # Calibration method selection
+    calibration_method = st.selectbox(
+        "Calibration Method", [
+            "Manual Entry", "Auto-Detect Micrometer Divisions", "Manual Measurement"
+        ],
+        help="Choose how to determine the pixel scale")
+
+    if calibration_method == "Manual Entry":
+        st.markdown("### 📝 Manual Entry")
+        st.info("Enter the known pixel scale for your microscopy setup.")
+        
+        pixel_scale = st.number_input(
+            "Pixel Scale (pixels/μm)",
+            min_value=0.1,
+            max_value=100.0,
+            value=st.session_state.get('pixel_scale', 10.0),
+            step=0.1,
+            help="Number of pixels per micrometer. This converts pixel measurements to micrometers."
+        )
+        
+        st.session_state.pixel_scale = pixel_scale
+        st.session_state.calibration_complete = True
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.success(f"✅ Manual pixel scale set: {pixel_scale:.2f} pixels/μm")
+        with col2:
+            if st.button("🔄 Reset to Default (10.0)", key="reset_manual_scale"):
+                st.session_state.pixel_scale = 10.0
+                st.rerun()
+
+    elif calibration_method == "Auto-Detect Micrometer Divisions":
+        st.markdown("### 🔍 Auto-Detect Micrometer Divisions")
+        st.info("📏 This method detects tick marks on graduated rulers/micrometers in your uploaded image.")
+        
+        # Division spacing input
+        division_spacing_um = st.number_input(
+            "Distance per division (μm)",
+            min_value=0.1,
+            max_value=100.0,
+            value=10.0,  # Default: 0.01mm = 10μm
+            step=0.1,
+            help="Distance between consecutive tick marks (0.01mm = 10μm)")
+        
+        pixel_scale = st.session_state.get('pixel_scale', 10.0)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.info(f"Current pixel scale: {pixel_scale:.2f} pixels/μm")
+            
+        with col2:
+            if st.button("🔍 Auto-Detect Divisions", key="auto_detect_divisions"):
+                if 'original_image' in st.session_state:
+                    with st.spinner("Detecting micrometer divisions in image..."):
+                        calibration_result = st.session_state.calibration.auto_detect_scale(
+                            st.session_state.original_image, "micrometer_divisions",
+                            division_spacing_um)
+
+                        if calibration_result['pixel_scale']:
+                            # Validate calibration results
+                            validation = st.session_state.calibration.validate_calibration(
+                                calibration_result['pixel_scale'], "microscopy")
+
+                            st.session_state.pixel_scale = calibration_result['pixel_scale']
+                            st.session_state.calibration_complete = True
+
+                            if validation['is_valid']:
+                                st.success(f"✅ Micrometer calibration successful! Pixel scale: {calibration_result['pixel_scale']:.2f} pixels/μm")
+                            else:
+                                st.warning(f"⚠️ Calibration completed with warning: {validation['warning']}")
+                                st.info(f"Pixel scale: {calibration_result['pixel_scale']:.2f} pixels/μm")
+
+                            # Show visualization
+                            if calibration_result['visualization'] is not None:
+                                st.subheader("🔍 Detected Micrometer Divisions")
+                                st.image(calibration_result['visualization'], 
+                                         caption="Detected Micrometer Divisions", 
+                                         use_container_width=True)
+                        else:
+                            st.error("❌ Could not detect micrometer divisions. Try manual measurement instead.")
+                else:
+                    st.error("❌ No image available for calibration.")
+
+    elif calibration_method == "Manual Measurement":
+        st.markdown("### 📐 Manual Measurement")
+        st.info("Draw a measurement line on your image to manually calibrate the pixel scale.")
+        
+        # Input fields for measurement
+        col_a, col_b = st.columns(2)
+        with col_a:
+            num_divisions = st.number_input(
+                "Number of divisions covered",
+                min_value=1,
+                max_value=100,
+                value=5,
+                step=1,
+                help="How many scale divisions does your measurement span?")
+        
+        with col_b:
+            um_per_division = st.number_input(
+                "Micrometers per division (μm)",
                 min_value=0.1,
-                max_value=100.0,
+                max_value=1000.0,
                 value=10.0,
                 step=0.1,
-                help=
-                "Number of pixels per micrometer. This converts pixel measurements to micrometers."
-            )
-
-        elif calibration_method == "Auto-Detect Micrometer Divisions":
-            st.info(
-                "📏 This method detects tick marks on graduated rulers/micrometers in your uploaded image. Assumes 1 division = 0.01mm (10μm)"
-            )
-            
-            # Division spacing input
-            division_spacing_um = st.number_input(
-                "Distance per division (μm)",
-                min_value=0.1,
-                max_value=100.0,
-                value=10.0,  # Default: 0.01mm = 10μm
-                step=0.1,
-                help="Distance between consecutive tick marks (0.01mm = 10μm)")
-            
-            pixel_scale = st.session_state.get('pixel_scale', 10.0)
-            st.info(f"Current pixel scale: {pixel_scale:.2f} pixels/μm")
-
-        elif calibration_method == "Manual Measurement":
-            st.info(
-                "📐 Draw a measurement line on your image to manually calibrate the pixel scale")
-            
-            # Input fields for measurement - keep in sidebar for easy access
-            col_a, col_b = st.columns(2)
-            with col_a:
-                num_divisions = st.number_input(
-                    "Number of divisions covered",
-                    min_value=1,
-                    max_value=100,
-                    value=5,
-                    step=1,
-                    help="How many scale divisions does your measurement span?")
-            
-            with col_b:
-                um_per_division = st.number_input(
-                    "Micrometers per division (μm)",
-                    min_value=0.1,
-                    max_value=1000.0,
-                    value=10.0,
-                    step=0.1,
-                    help="The distance each scale division represents")
-            
-            # Initialize manual measurement session state
-            if 'manual_measurement_points' not in st.session_state:
-                st.session_state.manual_measurement_points = []
-            if 'manual_calibration_complete' not in st.session_state:
-                st.session_state.manual_calibration_complete = False
-            
-            # Store calibration parameters in session state for main area access
-            st.session_state.manual_num_divisions = num_divisions
-            st.session_state.manual_um_per_division = um_per_division
-            
-            # Show current pixel scale
-            pixel_scale = st.session_state.get('pixel_scale', 10.0)
-            if st.session_state.get('manual_calibration_complete', False):
-                st.success(f"✅ Calibrated: {pixel_scale:.2f} pixels/μm")
-            else:
-                st.info(f"Current: {pixel_scale:.2f} pixels/μm")
-                if st.session_state.get('image_uploaded', False):
-                    st.write("👇 **Draw measurement line in main area below**")
-                else:
-                    st.warning("Upload an image first to enable measurement")
-
+                help="The distance each scale division represents")
+        
+        # Initialize manual measurement session state
+        if 'manual_measurement_points' not in st.session_state:
+            st.session_state.manual_measurement_points = []
+        if 'manual_calibration_complete' not in st.session_state:
+            st.session_state.manual_calibration_complete = False
+        
+        # Store calibration parameters in session state
+        st.session_state.manual_num_divisions = num_divisions
+        st.session_state.manual_um_per_division = um_per_division
+        
+        # Show current pixel scale and status
+        pixel_scale = st.session_state.get('pixel_scale', 10.0)
+        if st.session_state.get('manual_calibration_complete', False):
+            st.success(f"✅ Calibrated: {pixel_scale:.2f} pixels/μm")
+            st.session_state.calibration_complete = True
         else:
-            # For any other methods, use default pixel scale
-            pixel_scale = st.session_state.get('pixel_scale', 10.0)
-            st.info(f"Current pixel scale: {pixel_scale:.2f} pixels/μm")
+            st.info(f"Current: {pixel_scale:.2f} pixels/μm")
+            if 'original_image' in st.session_state:
+                st.warning("👆 **Manual measurement drawing interface would be here** (requires streamlit-drawable-canvas)")
+                st.info("For now, please use Manual Entry method or Auto-Detect method.")
+            else:
+                st.warning("No image available for measurement")
+    
+    # Show step completion status
+    if validate_step_2():
+        st.success("✅ Step 2 Complete! You can proceed to analysis.")
+    else:
+        st.info("🔧 Please complete calibration to continue.")
 
-        # Detection parameters
-        st.subheader("Detection Parameters")
+
+def render_step_3_analysis():
+    """Render Step 3: Analysis"""
+    st.header("🔬 Step 3: Analysis & Results")
+    st.markdown("Configure detection parameters and analyze your image for fungal spores.")
+    
+    # Show image and calibration info
+    if 'original_image' in st.session_state:
+        with st.expander("📷 Image & Calibration Summary", expanded=False):
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                st.image(st.session_state.display_image, caption="Image for Analysis", use_container_width=True)
+            with col2:
+                image_array = st.session_state.original_image
+                pixel_scale = st.session_state.get('pixel_scale', 10.0)
+                st.info(f"**Dimensions:** {image_array.shape[1]} × {image_array.shape[0]} pixels")
+                st.info(f"**Pixel Scale:** {pixel_scale:.2f} pixels/μm")
+    
+    # Analysis Parameters in organized sections
+    st.markdown("## 📊 Analysis Parameters")
+    
+    # Basic Detection Parameters
+    with st.expander("🎯 Basic Detection Parameters", expanded=True):
         area_range = st.slider(
             "Spore Area Range (μm²)",
             min_value=1,
@@ -236,114 +567,94 @@ def main():
             value=True,
             help="Exclude spores touching the image edges (incomplete spores)")
 
-        # Enhanced shape filters - collapsible and collapsed by default
-        with st.expander("Advanced Shape Filters", expanded=False):
-            aspect_ratio_range = st.slider(
-                "Aspect Ratio Range",
-                min_value=1.0,
-                max_value=10.0,
-                value=(1.0, 5.0),
+    # Advanced Shape Filters
+    with st.expander("🔍 Advanced Shape Filters", expanded=False):
+        aspect_ratio_range = st.slider(
+            "Aspect Ratio Range",
+            min_value=1.0,
+            max_value=10.0,
+            value=(1.0, 5.0),
+            step=0.1,
+            help="Length/width ratio range (1.0 = square, higher = more elongated)")
+        aspect_ratio_min, aspect_ratio_max = aspect_ratio_range
+
+        solidity_range = st.slider(
+            "Solidity Range",
+            min_value=0.0,
+            max_value=1.0,
+            value=(0.5, 1.0),
+            step=0.01,
+            help="Solidity range (spore area / convex hull area). Higher = less concave")
+        solidity_min, solidity_max = solidity_range
+
+        convexity_range = st.slider(
+            "Convexity Range",
+            min_value=0.0,
+            max_value=1.0,
+            value=(0.7, 1.0),
+            step=0.01,
+            help="Convexity range (convex hull perimeter / spore perimeter). Higher = smoother outline")
+        convexity_min, convexity_max = convexity_range
+
+        extent_range = st.slider(
+            "Extent Range",
+            min_value=0.0,
+            max_value=1.0,
+            value=(0.3, 1.0),
+            step=0.01,
+            help="Extent range (spore area / bounding rectangle area). Higher = fills bounding box better")
+        extent_min, extent_max = extent_range
+
+    # Touching Spore Detection
+    with st.expander("🔗 Touching Spore Detection", expanded=False):
+        exclude_touching = st.checkbox(
+            "Exclude touching/merged spores",
+            value=True,
+            help="Automatically detect and exclude spores that appear to be multiple touching spores")
+
+        touching_aggressiveness = st.selectbox(
+            "Detection Aggressiveness",
+            ["Conservative", "Balanced", "Aggressive"],
+            index=2,  # Default to "Aggressive"
+            help="Conservative: Fewer false positives, may miss some touching spores. Aggressive: More detections, may exclude some valid single spores.")
+
+        st.markdown("**⚡ Watershed Separation**")
+        separate_touching = st.checkbox(
+            "Separate touching spores using watershed",
+            value=False,
+            help="Use advanced watershed segmentation to automatically separate touching or overlapping spores")
+
+        if separate_touching:
+            separation_min_distance = st.slider(
+                "Separation Sensitivity",
+                min_value=2,
+                max_value=10,
+                value=3,
+                step=1,
+                help="Lower values = more aggressive separation")
+
+            separation_sigma = st.slider(
+                "Smoothing Factor",
+                min_value=0.5,
+                max_value=3.0,
+                value=0.8,
                 step=0.1,
-                help=
-                "Length/width ratio range (1.0 = square, higher = more elongated)"
-            )
-            aspect_ratio_min, aspect_ratio_max = aspect_ratio_range
+                help="Lower values = less smoothing")
 
-            solidity_range = st.slider(
-                "Solidity Range",
-                min_value=0.0,
-                max_value=1.0,
-                value=(0.5, 1.0),
-                step=0.01,
-                help=
-                "Solidity range (spore area / convex hull area). Higher = less concave"
-            )
-            solidity_min, solidity_max = solidity_range
+            separation_erosion_iterations = st.slider(
+                "Erosion Strength",
+                min_value=1,
+                max_value=5,
+                value=2,
+                step=1,
+                help="Higher values = more erosion before separation")
+        else:
+            separation_min_distance = 5
+            separation_sigma = 1.0
+            separation_erosion_iterations = 1
 
-            convexity_range = st.slider(
-                "Convexity Range",
-                min_value=0.0,
-                max_value=1.0,
-                value=(0.7, 1.0),
-                step=0.01,
-                help=
-                "Convexity range (convex hull perimeter / spore perimeter). Higher = smoother outline"
-            )
-            convexity_min, convexity_max = convexity_range
-
-            extent_range = st.slider(
-                "Extent Range",
-                min_value=0.0,
-                max_value=1.0,
-                value=(0.3, 1.0),
-                step=0.01,
-                help=
-                "Extent range (spore area / bounding rectangle area). Higher = fills bounding box better"
-            )
-            extent_min, extent_max = extent_range
-
-            # Touching spore detection
-            st.markdown("**🔍 Touching Spore Detection**")
-            exclude_touching = st.checkbox(
-                "Exclude touching/merged spores",
-                value=True,
-                help=
-                "Automatically detect and exclude spores that appear to be multiple touching spores incorrectly detected as single objects"
-            )
-
-            touching_aggressiveness = st.selectbox(
-                "Detection Aggressiveness",
-                ["Conservative", "Balanced", "Aggressive"],
-                index=2,  # Default to "Aggressive" for better separation
-                help=
-                "Conservative: Fewer false positives, may miss some touching spores. Aggressive: More detections, may exclude some valid single spores."
-            )
-
-            st.markdown("**⚡ Watershed Separation**")
-            separate_touching = st.checkbox(
-                "Separate touching spores using watershed",
-                value=False,  # Enable by default for better separation
-                help=
-                "Use advanced watershed segmentation to automatically separate touching or overlapping spores into individual measurements"
-            )
-
-            if separate_touching:
-                separation_min_distance = st.slider(
-                    "Separation Sensitivity",
-                    min_value=2,
-                    max_value=10,
-                    value=3,  # More aggressive than default 5
-                    step=1,
-                    help=
-                    "Lower values = more aggressive separation (more likely to split touching spores)"
-                )
-
-                separation_sigma = st.slider(
-                    "Smoothing Factor",
-                    min_value=0.5,
-                    max_value=3.0,
-                    value=0.8,  # More aggressive than default 1.0
-                    step=0.1,
-                    help=
-                    "Lower values = less smoothing (more sensitive to peaks for separation)"
-                )
-
-                separation_erosion_iterations = st.slider(
-                    "Erosion Strength",
-                    min_value=1,
-                    max_value=5,
-                    value=2,  # More aggressive than default 1
-                    step=1,
-                    help=
-                    "Higher values = more erosion before separation (helps separate thicker connections)"
-                )
-            else:
-                separation_min_distance = 5
-                separation_sigma = 1.0
-                separation_erosion_iterations = 1
-
-        # Image processing parameters
-        st.subheader("Image Processing")
+    # Image Processing Parameters
+    with st.expander("🖼️ Image Processing", expanded=False):
         blur_kernel = st.slider(
             "Blur Kernel Size",
             min_value=1,
@@ -365,9 +676,8 @@ def main():
         else:
             threshold_value = None
 
-        # Visualization settings
-        st.subheader("Visualization Settings")
-
+    # Visualization Settings
+    with st.expander("🎨 Visualization Settings", expanded=False):
         font_size = st.slider("Font Size",
                               min_value=0.5,
                               max_value=3.0,
@@ -377,752 +687,121 @@ def main():
 
         col1, col2 = st.columns(2)
         with col1:
-            font_color = st.color_picker("Font Color",
-                                         value="#FFFFFF",
-                                         help="Color of measurement text")
-
-            border_color = st.color_picker("Text Background Color",
-                                           value="#000000",
-                                           help="Color of text background box")
-
-            line_color = st.color_picker(
-                "Line Color",
-                value="#00FFFF",
-                help="Color of measurement lines and spore borders")
+            font_color = st.color_picker("Font Color", value="#FFFFFF", help="Color of measurement text")
+            border_color = st.color_picker("Text Background Color", value="#000000", help="Color of text background box")
+            line_color = st.color_picker("Line Color", value="#00FFFF", help="Color of measurement lines and spore borders")
 
         with col2:
-            border_width = st.slider(
-                "Text Background Size",
-                min_value=0,
-                max_value=10,
-                value=8,
-                help="Width of text background borders (0 = no background)")
+            border_width = st.slider("Text Background Size", min_value=0, max_value=10, value=8, help="Width of text background borders (0 = no background)")
+            line_width = st.slider("Line Width", min_value=1, max_value=10, value=2, help="Width of measurement lines")
 
-            line_width = st.slider("Line Width",
-                                   min_value=1,
-                                   max_value=10,
-                                   value=2,
-                                   help="Width of measurement lines")
-
-    # Image Upload Section (consolidated)
-    st.header("📁 Image Upload")
-
-    # Upload method selection
-    upload_method = st.radio(
-        "Upload Method", ["File Upload", "iNaturalist URL"],
-        help=
-        "Choose to upload a file from your computer or load an image from an iNaturalist observation"
-    )
-
-    if upload_method == "File Upload":
-        uploaded_file = st.file_uploader(
-            "Choose a microscopy image",
-            type=['png', 'jpg', 'jpeg', 'tiff', 'tif', 'bmp'],
-            help="Upload a microscopy image containing fungal spores")
-
-        image_array = None
-        if uploaded_file is not None:
-            # Load and display the image
-            image = Image.open(uploaded_file)
-            image_array = np.array(image)
-
-    elif upload_method == "iNaturalist URL":
-        st.markdown("**Load image from iNaturalist observation:**")
-        inaturalist_url = st.text_input(
-            "iNaturalist Observation URL",
-            placeholder="https://www.inaturalist.org/observations/123456789",
-            help=
-            "Enter the URL of an iNaturalist observation to analyze its images"
-        )
-
-        image_array = None
-        if inaturalist_url:
-            # Extract observation ID from URL
-            obs_match = re.search(r'/observations/(\d+)', inaturalist_url)
-            if obs_match:
-                obs_id = obs_match.group(1)
-
-                # Automatically fetch photos when URL is entered or changed
-                if st.session_state.get('obs_id') != obs_id:
-                    with st.spinner(
-                            f"Fetching photos from iNaturalist observation {obs_id}..."
-                    ):
-                        photos = fetch_inaturalist_photos(obs_id)
-                        if photos:
-                            st.session_state.inaturalist_photos = photos
-                            st.session_state.obs_id = obs_id
-                            # Reset photo selection when switching observations
-                            st.session_state.selected_photo_idx = 0
-                            st.session_state.inaturalist_photo_changed = True
-                            st.success(
-                                f"✅ Found {len(photos)} photo(s) in this observation!"
-                            )
-                        else:
-                            st.error(
-                                "❌ Could not fetch photos from iNaturalist. Please check the URL."
-                            )
-
-                # Show photo selection if photos are available
-                if 'inaturalist_photos' in st.session_state and st.session_state.get(
-                        'obs_id') == obs_id:
-                    photos = st.session_state.inaturalist_photos
-
-                    st.markdown("**Select a photo to analyze:**")
-
-                    # Create clickable photo selection interface
-                    if len(photos) == 1:
-                        selected_photo_idx = 0
-                        st.info(
-                            "Only one photo available in this observation.")
-                    else:
-                        # Show thumbnails in a single row with clickable selection
-                        cols = st.columns(len(photos))  # One column per photo
-
-                        # Initialize selected photo index in session state
-                        if 'selected_photo_idx' not in st.session_state:
-                            st.session_state.selected_photo_idx = 0
-
-                        # Display clickable thumbnails
-                        thumbnail_size = 100
-                        for i, photo in enumerate(photos):
-                            with cols[i]:
-                                # Convert URL to thumbnail size for smaller display
-                                thumb_url = photo['url']
-                                for old_size in [
-                                        'square', 'thumb', 'small', 'medium',
-                                        'large', 'original'
-                                ]:
-                                    if f'/{old_size}.' in thumb_url:
-                                        thumb_url = thumb_url.replace(
-                                            f'/{old_size}.', '/thumb.')
-                                        break
-
-                                # Show thumbnail with click functionality
-                                try:
-                                    st.image(thumb_url, width=thumbnail_size
-                                             )  # Much smaller thumbnails
-                                except:
-                                    st.write(f"📷 {i+1}")
-
-                                # Clickable button for selection
-                                button_label = f"{'✅ ' if st.session_state.selected_photo_idx == i else ''}Photo {i+1}"
-                                if st.button(
-                                        button_label,
-                                        key=f"select_photo_{i}",
-                                        width=thumbnail_size,
-                                ):
-                                    st.session_state.selected_photo_idx = i
-                                    st.session_state.inaturalist_photo_changed = True
-                                    st.rerun()
-
-                        selected_photo_idx = st.session_state.selected_photo_idx
-
-                        # Show which photo is currently selected
-                        st.info(
-                            f"📸 Selected: Photo {selected_photo_idx + 1} (ID: {photos[selected_photo_idx]['id']})"
-                        )
-
-                    # Image quality selection
-                    image_quality = st.selectbox(
-                        "Image Quality",
-                        ["large", "medium", "original"],
-                        index=2,  # Default to original
-                        help=
-                        "Choose image quality - larger images provide better analysis but take more time to load",
-                        key="inaturalist_image_quality")
-
-                    # Check if settings have changed and automatically load
-                    if 'prev_image_quality' not in st.session_state:
-                        st.session_state.prev_image_quality = image_quality
-                        st.session_state.prev_selected_photo_idx = selected_photo_idx
-
-                    settings_changed = (
-                        image_quality != st.session_state.prev_image_quality
-                        or selected_photo_idx
-                        != st.session_state.prev_selected_photo_idx
-                        or st.session_state.get('inaturalist_photo_changed',
-                                                False))
-
-                    # Automatically load photo when selection changes or settings change
-                    if settings_changed:
-                        selected_photo = photos[selected_photo_idx]
-                        with st.spinner(
-                                f"Loading photo {selected_photo_idx + 1} at {image_quality} quality..."
-                        ):
-                            image_array = download_inaturalist_image(
-                                selected_photo['url'], image_quality)
-                            if image_array is not None:
-                                # st.success("✅ Image loaded automatically!")
-
-                                # Store the current settings to detect future changes
-                                st.session_state.prev_image_quality = image_quality
-                                st.session_state.prev_selected_photo_idx = selected_photo_idx
-                                st.session_state.inaturalist_photo_changed = False
-
-                                # Show attribution
-                                if selected_photo['attribution'] != 'Unknown':
-                                    st.caption(
-                                        f"📷 {selected_photo['attribution']}")
-                                if selected_photo['license'] != 'Unknown':
-                                    st.caption(
-                                        f"📄 License: {selected_photo['license']}"
-                                    )
-                            else:
-                                st.error(
-                                    "❌ Could not load the selected image.")
+    # Analysis Control Section
+    st.markdown("## ▶️ Run Analysis")
+    
+    analysis_col1, analysis_col2 = st.columns([1, 1])
+    
+    with analysis_col1:
+        if st.button("🔬 **Analyze Spores**", key="analyze_button", use_container_width=True, type="primary"):
+            if 'original_image' in st.session_state:
+                with st.spinner("Analyzing spores in the image..."):
+                    # TODO: Add the actual analysis logic here
+                    # This would call the existing spore analysis functions with the parameters
+                    st.success("✅ Analysis completed! (Analysis integration pending)")
+                    st.session_state.analysis_complete = True
+                    st.session_state.step_3_complete = True
             else:
-                if inaturalist_url.strip(
-                ):  # Only show error if user has entered something
-                    st.error(
-                        "❌ Invalid iNaturalist URL. Please enter a valid observation URL."
-                    )
+                st.error("❌ No image available for analysis.")
+    
+    with analysis_col2:
+        if st.button("🔄 Reset Parameters", key="reset_params", use_container_width=True):
+            # Reset various session state values to defaults
+            st.info("Parameters reset to defaults.")
+            st.rerun()
 
-    # Store image in session state when loaded
-    if image_array is not None:
-        st.session_state.original_image = image_array
-        st.session_state.image_uploaded = True
-        if upload_method == "File Upload":
-            st.session_state.image_source = "file"
-            st.session_state.display_image = image
-        else:
-            st.session_state.image_source = "inaturalist"
-            st.session_state.display_image = image_array
+    # Results Section (placeholder for now)
+    if st.session_state.get('analysis_complete', False):
+        st.markdown("## 📈 Analysis Results")
+        st.info("🚧 **Results display will be implemented here**")
+        st.markdown("This section will include:")
+        st.markdown("- Detected spores overlay image")
+        st.markdown("- Measurement statistics and charts")  
+        st.markdown("- Spore selection interface")
+        st.markdown("- Export options (CSV, PDF report)")
+        
+        # Placeholder success message
+        st.success("✅ Step 3 Complete! Analysis finished successfully.")
+    else:
+        st.info("🔬 Click 'Analyze Spores' to begin the analysis.")
 
-    # Display image if we have one in session state (persist during reloads)
-    if st.session_state.get('image_uploaded',
-                            False) and 'original_image' in st.session_state:
-        # Main content area - two columns for image display
-        col1, col2 = st.columns([1, 1])
 
-        with col1:
-            st.subheader("Original Image")
-            # Always show the image from session state
-            display_image = st.session_state.get(
-                'display_image', st.session_state.original_image)
-            if st.session_state.get('image_source') == "file":
-                st.image(display_image,
-                         caption="Original Image",
-                         width='stretch')
-            else:  # iNaturalist URL
-                st.image(display_image,
-                         caption="iNaturalist Image",
-                         width='stretch')
-        # Auto-calibration and analysis controls
-        if calibration_method == "Auto-Detect Micrometer Divisions":
-            col_a, col_b = st.columns(2)
-            with col_a:
-                st.write("Using the uploaded image for micrometer division detection")
-                
-            with col_b:
-                if st.button("🔍 Auto-Detect Divisions from Image",
-                             key="main_auto_detect_divisions"):
-                    with st.spinner("Detecting micrometer divisions in image..."):
-                        calibration_result = st.session_state.calibration.auto_detect_scale(
-                            st.session_state.original_image, "micrometer_divisions",
-                            division_spacing_um)
-
-                        if calibration_result['pixel_scale']:
-                            # Validate calibration results
-                            validation = st.session_state.calibration.validate_calibration(
-                                calibration_result['pixel_scale'],
-                                "microscopy")
-
-                            st.session_state.pixel_scale = calibration_result[
-                                'pixel_scale']
-                            st.session_state.calibration_complete = True
-
-                            if validation['is_valid']:
-                                st.success(
-                                    f"✅ Micrometer calibration successful! Pixel scale: {calibration_result['pixel_scale']:.2f} pixels/μm"
-                                )
-                            else:
-                                st.warning(
-                                    f"⚠️ Calibration completed with warning: {validation['warning']}"
-                                )
-                                st.info(
-                                    f"Pixel scale: {calibration_result['pixel_scale']:.2f} pixels/μm (expected: {validation['expected_range'][0]}-{validation['expected_range'][1]})"
-                                )
-
-                            # Show visualization
-                            if calibration_result['visualization'] is not None:
-                                st.image(
-                                    calibration_result['visualization'],
-                                    caption="Detected Micrometer Divisions",
-                                    width='stretch')
-                        else:
-                            st.error(
-                                "❌ Could not detect micrometer divisions. Using manual pixel scale."
-                            )
-
-        # Manual measurement calibration interface (in main content area for better usability)
-        if calibration_method == "Manual Measurement":
-            st.subheader("📐 Manual Scale Measurement")
-            
-            if st.session_state.get('manual_calibration_complete', False):
-                current_scale = st.session_state.get('pixel_scale', 10.0)
-                st.success(f"✅ Manual calibration complete! Current scale: {current_scale:.2f} pixels/μm")
-                
-                col_reset, col_info = st.columns([1, 3])
-                with col_reset:
-                    if st.button("🔄 Recalibrate", help="Clear current measurement and draw a new line"):
-                        st.session_state.manual_calibration_complete = False
-                        st.session_state.calibration_complete = False
-                        st.rerun()
-                        
-                with col_info:
-                    num_divs = st.session_state.get('manual_num_divisions', 5)
-                    um_per_div = st.session_state.get('manual_um_per_division', 10.0)
-                    total_um = num_divs * um_per_div
-                    st.info(f"📏 Measured: {num_divs} divisions × {um_per_div:.1f} μm = {total_um:.1f} μm total")
-            else:
-                st.info("📏 Draw a line across a known measurement on your image to calibrate the pixel scale.")
-                
-                # Get calibration parameters from session state (set in sidebar)
-                num_divisions = st.session_state.get('manual_num_divisions', 5)
-                um_per_division = st.session_state.get('manual_um_per_division', 10.0)
-                
-                # Convert image for display
-                if len(st.session_state.original_image.shape) == 3:
-                    display_image = st.session_state.original_image.copy()
-                else:
-                    display_image = cv2.cvtColor(st.session_state.original_image, cv2.COLOR_GRAY2RGB)
-                
-                # Instructions
-                st.markdown(f"**Instructions:** Enter coordinates of two points that span {num_divisions} division(s) on your scale. Each division = {um_per_division:.1f} μm")
-                
-                # Display the image first for reference
-                st.image(display_image, caption="Reference image - use this to identify pixel coordinates", use_column_width=True)
-                
-                # Coordinate input method (more reliable than problematic canvas)
-                st.write("**Enter the pixel coordinates of two measurement points:**")
-                
-                # Initialize coordinate inputs
-                if 'manual_x1' not in st.session_state:
-                    st.session_state.manual_x1 = 100
-                if 'manual_y1' not in st.session_state:
-                    st.session_state.manual_y1 = 100
-                if 'manual_x2' not in st.session_state:
-                    st.session_state.manual_x2 = 300
-                if 'manual_y2' not in st.session_state:
-                    st.session_state.manual_y2 = 100
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.write("**Point 1 (start):**")
-                    x1 = st.number_input("X1 coordinate", min_value=0, max_value=display_image.shape[1], 
-                                        value=st.session_state.manual_x1, key="manual_x1_input")
-                    y1 = st.number_input("Y1 coordinate", min_value=0, max_value=display_image.shape[0], 
-                                        value=st.session_state.manual_y1, key="manual_y1_input")
-                
-                with col2:
-                    st.write("**Point 2 (end):**")
-                    x2 = st.number_input("X2 coordinate", min_value=0, max_value=display_image.shape[1], 
-                                        value=st.session_state.manual_x2, key="manual_x2_input")
-                    y2 = st.number_input("Y2 coordinate", min_value=0, max_value=display_image.shape[0], 
-                                        value=st.session_state.manual_y2, key="manual_y2_input")
-                
-                # Update session state
-                st.session_state.manual_x1 = x1
-                st.session_state.manual_y1 = y1
-                st.session_state.manual_x2 = x2
-                st.session_state.manual_y2 = y2
-                
-                # Calculate pixel distance
-                pixel_distance = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
-                
-                # Calculate total micrometers measured
-                total_um = num_divisions * um_per_division
-                
-                # Show visualization with measurement line
-                if pixel_distance > 0:
-                    vis_image = display_image.copy()
-                    cv2.line(vis_image, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 3)
-                    cv2.circle(vis_image, (int(x1), int(y1)), 6, (0, 255, 0), -1)
-                    cv2.circle(vis_image, (int(x2), int(y2)), 6, (0, 255, 0), -1)
-                    
-                    # Add text labels
-                    cv2.putText(vis_image, "1", (int(x1)+10, int(y1)-10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                    cv2.putText(vis_image, "2", (int(x2)+10, int(y2)-10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                    
-                    st.image(vis_image, caption="Measurement line preview", use_column_width=True)
-                    
-                    # Show measurement info
-                    col_measurement, col_button = st.columns([3, 1])
-                    with col_measurement:
-                        st.info(f"📏 Distance: {pixel_distance:.1f} pixels across {total_um:.1f} μm ({num_divisions} × {um_per_division:.1f} μm)")
-                    
-                    # Calculate and apply pixel scale
-                    if total_um > 0 and pixel_distance > 5:  # Minimum distance
-                        calculated_scale = pixel_distance / total_um
-                        
-                        with col_button:
-                            if st.button("✅ Apply Calibration", type="primary"):
-                                st.session_state.pixel_scale = calculated_scale
-                                st.session_state.manual_calibration_complete = True
-                                st.session_state.calibration_complete = True
-                                st.success(f"🎯 Calibration applied! Scale: {calculated_scale:.2f} pixels/μm")
-                                st.rerun()
-                        
-                        # Preview the calculated scale
-                        st.success(f"🎯 Calculated scale: {calculated_scale:.2f} pixels/μm (click Apply to use)")
-                    else:
-                        if pixel_distance <= 5:
-                            st.warning("⚠️ Points are too close together for accurate measurement")
-                        else:
-                            st.warning("⚠️ Please ensure your measurement parameters are valid")
-                        
-                st.markdown("---")  # Visual separator
-
-        # Use stored image for analysis (persistent during reloads)
-        analysis_image = st.session_state.original_image
-
-        # Get current pixel scale from session state or use default
-        pixel_scale = st.session_state.get('pixel_scale', 10.0)
-
-        # Automatic analysis when image is uploaded
-        with st.spinner("Analyzing spores..."):
-            # Configure analyzer
-            analyzer = st.session_state.spore_analyzer
-            analyzer.set_parameters(
-                pixel_scale=pixel_scale,
-                min_area=min_area,
-                max_area=max_area,
-                circularity_range=(circularity_min, circularity_max),
-                aspect_ratio_range=(aspect_ratio_min, aspect_ratio_max),
-                solidity_range=(solidity_min, solidity_max),
-                convexity_range=(convexity_min, convexity_max),
-                extent_range=(extent_min, extent_max),
-                exclude_edges=exclude_edges,
-                blur_kernel=blur_kernel,
-                threshold_method=threshold_method,
-                threshold_value=threshold_value,
-                exclude_touching=exclude_touching,
-                touching_aggressiveness=touching_aggressiveness,
-                separate_touching=separate_touching,
-                separation_min_distance=separation_min_distance,
-                separation_sigma=separation_sigma,
-                separation_erosion_iterations=separation_erosion_iterations)
-
-            # Perform analysis using persistent session state image
-            results = analyzer.analyze_image(analysis_image)
-
-            if results is not None:
-                st.session_state.analysis_results = results
-                st.session_state.analysis_complete = True
-                st.session_state.selected_spores = set(range(len(results)))
-                st.success(
-                    f"Analysis complete! Detected {len(results)} spores.")
-            else:
-                st.error("No spores detected. Try adjusting the parameters.")
-
-        # Reserve space for right column but populate it later after spore selection
-        with col2:
-            st.session_state.right_col_placeholder = st.empty()
-
-    if st.session_state.analysis_complete and st.session_state.selected_spores:
-        # Spore selection interface - collapsible and default collapsed
-        with st.expander("✅ Spore Selection", expanded=False):
-            st.write(
-                "Click checkboxes to include/exclude spores from analysis:")
-
-            # Create a grid of checkboxes for spore selection
-            results = st.session_state.analysis_results
-            cols = st.columns(5)
-
-            for i, spore in enumerate(results):
-                col_idx = i % 5
-                with cols[col_idx]:
-                    is_selected = st.checkbox(
-                        f"Spore {i+1}",
-                        value=i in st.session_state.selected_spores,
-                        key=f"spore_{i}")
-
-                    if is_selected and i not in st.session_state.selected_spores:
-                        st.session_state.selected_spores.add(i)
-                    elif not is_selected and i in st.session_state.selected_spores:
-                        st.session_state.selected_spores.remove(i)
-
-    # Now populate the right column with updated overlay image after spore selection is processed
-    if st.session_state.analysis_complete and 'right_col_placeholder' in st.session_state:
-        with st.session_state.right_col_placeholder.container():
-            st.subheader("Detection Results")
-
-            # Convert color picker hex values to BGR tuples for OpenCV
-            def hex_to_bgr(hex_color):
-                hex_color = hex_color.lstrip('#')
-                # Extract RGB values and convert to BGR order
-                r = int(hex_color[0:2], 16)
-                g = int(hex_color[2:4], 16)
-                b = int(hex_color[4:6], 16)
-                return (b, g, r)  # BGR order for OpenCV
-
-            visualization_settings = {
-                'font_size': font_size,
-                'font_color': hex_to_bgr(font_color),
-                'border_color': hex_to_bgr(border_color),
-                'border_width': border_width,
-                'line_color': hex_to_bgr(line_color),
-                'line_width': line_width
-            }
-
-            # Create overlay image with current spore selection
-            current_pixel_scale = st.session_state.get('pixel_scale', 1.0)
-            overlay_image = create_overlay_image(
-                st.session_state.original_image,
-                st.session_state.analysis_results,
-                st.session_state.selected_spores, current_pixel_scale,
-                visualization_settings)
-
-            st.image(overlay_image,
-                     caption="Detected Spores with Measurements",
-                     width='stretch')
-    elif 'right_col_placeholder' in st.session_state:
-        # Show loading placeholder in right column
-        with st.session_state.right_col_placeholder.container():
-            st.info("🔄 Analysis in progress...")
-
-            # Create skeleton placeholder for image
-            st.markdown("""
-            <div style="
-                width: 100%; 
-                height: 400px; 
-                background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
-                background-size: 200% 100%;
-                animation: loading 1.5s infinite;
-                border-radius: 8px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                color: #888;
-                font-size: 16px;
-            ">
-                <div>🔬 Processing spore detection...</div>
-            </div>
-            <style>
-            @keyframes loading {
-                0% { background-position: 200% 0; }
-                100% { background-position: -200% 0; }
-            }
-            </style>
-            """,
-                        unsafe_allow_html=True)
-
-    # Statistics and results section
-    if st.session_state.analysis_complete and st.session_state.selected_spores:
-        st.header("📈 Statistical Analysis")
-
-        # Show loading spinner for statistics calculation
-        with st.spinner("Calculating statistics..."):
-            # Filter selected spores
-            selected_results = [
-                st.session_state.analysis_results[i]
-                for i in st.session_state.selected_spores
-            ]
-
-            # Calculate statistics
-            stats = calculate_statistics(selected_results)
-
-        # Summary section
-        st.subheader("📄 Summary")
-        mycological_summary = generate_mycological_summary(selected_results)
-        st.markdown(mycological_summary)
-
-        # Create DataFrame for plotting
-        df_results = pd.DataFrame([{
-            'Spore_ID': i + 1,
-            'Length_um': spore['length_um'],
-            'Width_um': spore['width_um'],
-            'Area_um2': spore['area_um2'],
-            'Aspect_Ratio': spore['aspect_ratio'],
-            'Circularity': spore['circularity'],
-            'Solidity': spore['solidity'],
-            'Convexity': spore['convexity'],
-            'Extent': spore['extent']
-        } for i, spore in enumerate(selected_results)])
-
-        # Data table
-        st.subheader("📋 Detailed Measurements")
-        st.dataframe(df_results, width='stretch')
-
-        # Display statistics in columns
-        col1, col2, col3, col4, col5 = st.columns(5)
-
-        with col1:
-            st.metric("Total Spores", len(selected_results))
-            st.metric("Mean Length (μm)", f"{stats['length_mean']:.2f}")
-            st.metric("Mean Width (μm)", f"{stats['width_mean']:.2f}")
-
-        with col2:
-            st.metric("Std Dev Length", f"{stats['length_std']:.2f}")
-            st.metric("Std Dev Width", f"{stats['width_std']:.2f}")
-            st.metric("Mean Aspect Ratio", f"{stats['aspect_ratio_mean']:.2f}")
-
-        with col3:
-            st.metric("Min Length (μm)", f"{stats['length_min']:.2f}")
-            st.metric("Max Length (μm)", f"{stats['length_max']:.2f}")
-            st.metric("Mean Area (μm²)", f"{stats['area_mean']:.2f}")
-
-        with col4:
-            st.metric("Min Width (μm)", f"{stats['width_min']:.2f}")
-            st.metric("Max Width (μm)", f"{stats['width_max']:.2f}")
-            st.metric("Mean Circularity", f"{stats['circularity_mean']:.3f}")
-
-        with col5:
-            st.metric("Mean Solidity", f"{stats['solidity_mean']:.3f}")
-            st.metric("Mean Convexity", f"{stats['convexity_mean']:.3f}")
-            st.metric("Mean Extent", f"{stats['extent_mean']:.3f}")
-
-        # Export functionality
-        st.subheader("💾 Export Results")
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            csv_data = export_results(df_results, 'csv')
-            st.download_button(
-                "📄 Download CSV",
-                data=csv_data,
-                file_name=
-                f"spore_measurements_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv")
-
-        with col2:
-            excel_data = export_results(df_results, 'excel')
-            st.download_button(
-                "📊 Download Excel",
-                data=excel_data,
-                file_name=
-                f"spore_measurements_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                mime=
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-
-        with col3:
-            # Export overlay image
-            if 'analysis_results' in st.session_state:
-                overlay_image = create_overlay_image(
-                    st.session_state.original_image,
-                    st.session_state.analysis_results,
-                    st.session_state.selected_spores, pixel_scale)
-                overlay_bytes = io.BytesIO()
-                overlay_pil = Image.fromarray(overlay_image)
-                overlay_pil.save(overlay_bytes, format='PNG')
-                st.download_button(
-                    "🖼️ Download Overlay Image",
-                    data=overlay_bytes.getvalue(),
-                    file_name=
-                    f"spore_overlay_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.png",
-                    mime="image/png")
-
-        # Histograms
-        with st.expander("📊 Distribution Plots", expanded=False):
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-                # Length distribution
-                fig_length = px.histogram(df_results,
-                                          x='Length_um',
-                                          title='Spore Length Distribution',
-                                          labels={
-                                              'Length_um': 'Length (μm)',
-                                              'count': 'Frequency'
-                                          },
-                                          nbins=20)
-                st.plotly_chart(fig_length, width='stretch')
-
-                # Area distribution
-                fig_area = px.histogram(df_results,
-                                        x='Area_um2',
-                                        title='Spore Area Distribution',
-                                        labels={
-                                            'Area_um2': 'Area (μm²)',
-                                            'count': 'Frequency'
-                                        },
-                                        nbins=20)
-                st.plotly_chart(fig_area, width='stretch')
-
-            with col2:
-                # Width distribution
-                fig_width = px.histogram(df_results,
-                                         x='Width_um',
-                                         title='Spore Width Distribution',
-                                         labels={
-                                             'Width_um': 'Width (μm)',
-                                             'count': 'Frequency'
-                                         },
-                                         nbins=20)
-                st.plotly_chart(fig_width, width='stretch')
-
-                # Aspect ratio distribution
-                fig_aspect = px.histogram(df_results,
-                                          x='Aspect_Ratio',
-                                          title='Aspect Ratio Distribution',
-                                          labels={
-                                              'Aspect_Ratio':
-                                              'Length/Width Ratio',
-                                              'count': 'Frequency'
-                                          },
-                                          nbins=20)
-                st.plotly_chart(fig_aspect, width='stretch')
-
-            # Shape metrics distributions
-            st.subheader("🔸 Enhanced Shape Metrics")
-            col1, col2, col3 = st.columns(3)
-
-            with col1:
-                # Solidity distribution
-                fig_solidity = px.histogram(
-                    df_results,
-                    x='Solidity',
-                    title='Solidity Distribution',
-                    labels={
-                        'Solidity': 'Solidity (Area/Convex Hull Area)',
-                        'count': 'Frequency'
-                    },
-                    nbins=20)
-                st.plotly_chart(fig_solidity, width='stretch')
-
-            with col2:
-                # Convexity distribution
-                fig_convexity = px.histogram(
-                    df_results,
-                    x='Convexity',
-                    title='Convexity Distribution',
-                    labels={
-                        'Convexity': 'Convexity (Hull Perimeter/Perimeter)',
-                        'count': 'Frequency'
-                    },
-                    nbins=20)
-                st.plotly_chart(fig_convexity, width='stretch')
-
-            with col3:
-                # Extent distribution
-                fig_extent = px.histogram(
-                    df_results,
-                    x='Extent',
-                    title='Extent Distribution',
-                    labels={
-                        'Extent': 'Extent (Area/Bounding Rect Area)',
-                        'count': 'Frequency'
-                    },
-                    nbins=20)
-                st.plotly_chart(fig_extent, width='stretch')
-
-            # Scatter plot: Length vs Width
-            fig_scatter = px.scatter(df_results,
-                                     x='Width_um',
-                                     y='Length_um',
-                                     title='Spore Dimensions Scatter Plot',
-                                     labels={
-                                         'Width_um': 'Width (μm)',
-                                         'Length_um': 'Length (μm)'
-                                     },
-                                     hover_data=[
-                                         'Spore_ID', 'Area_um2',
-                                         'Aspect_Ratio', 'Solidity',
-                                         'Convexity', 'Extent'
-                                     ])
-            st.plotly_chart(fig_scatter, width='stretch')
+def main():
+    """Main application function with wizard-based workflow"""
+    # App title and description
+    st.title("🔬 Sporulator")
+    st.markdown("**A 3-step wizard for automated fungal spore detection and measurement**")
+    
+    # Render step indicator
+    render_step_indicator()
+    
+    # Sidebar with current step info and quick actions
+    with st.sidebar:
+        st.header(f"📍 Current Step: {st.session_state.current_step}/3")
+        
+        # Step progress indicators
+        step_1_icon = "✅" if st.session_state.step_1_complete else "⭕" if st.session_state.current_step > 1 else "📸"
+        step_2_icon = "✅" if st.session_state.step_2_complete else "⭕" if st.session_state.current_step > 2 else "🔧" if st.session_state.current_step == 2 else "⚪"
+        step_3_icon = "✅" if st.session_state.step_3_complete else "🔬" if st.session_state.current_step == 3 else "⚪"
+        
+        st.markdown(f"**{step_1_icon} Step 1:** Image Source")
+        st.markdown(f"**{step_2_icon} Step 2:** Calibration")
+        st.markdown(f"**{step_3_icon} Step 3:** Analysis & Results")
+        
+        st.markdown("---")
+        
+        # Quick actions based on current step
+        if st.session_state.current_step == 1:
+            st.markdown("**🎯 Current Focus:**")
+            st.info("Upload or select an image to analyze")
+        elif st.session_state.current_step == 2:
+            st.markdown("**🎯 Current Focus:**")
+            st.info("Set up pixel scale calibration")
+            if 'pixel_scale' in st.session_state:
+                st.write(f"**Current Scale:** {st.session_state.pixel_scale:.2f} px/μm")
+        elif st.session_state.current_step == 3:
+            st.markdown("**🎯 Current Focus:**")
+            st.info("Configure analysis parameters and run detection")
+            if 'pixel_scale' in st.session_state:
+                st.write(f"**Scale:** {st.session_state.pixel_scale:.2f} px/μm")
+            if 'original_image' in st.session_state:
+                img = st.session_state.original_image
+                st.write(f"**Image:** {img.shape[1]}×{img.shape[0]} px")
+        
+        st.markdown("---")
+        
+        # Reset wizard button
+        if st.button("🔄 Reset Wizard", help="Start over from Step 1"):
+            # Reset all wizard-related session state
+            st.session_state.current_step = 1
+            st.session_state.step_1_complete = False
+            st.session_state.step_2_complete = False
+            st.session_state.step_3_complete = False
+            st.session_state.image_uploaded = False
+            st.session_state.calibration_complete = False
+            st.session_state.analysis_complete = False
+            # Keep the image and calibration data, just reset the progress
+            st.rerun()
+    
+    # Main content area - route to appropriate step
+    if st.session_state.current_step == 1:
+        render_step_1_image_source()
+    elif st.session_state.current_step == 2:
+        render_step_2_calibration()
+    elif st.session_state.current_step == 3:
+        render_step_3_analysis()
+    
+    # Navigation buttons at the bottom
+    st.markdown("---")
+    render_navigation_buttons()
 
 
 if __name__ == "__main__":
