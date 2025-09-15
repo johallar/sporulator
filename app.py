@@ -822,10 +822,12 @@ def render_step_3_analysis():
                             st.session_state.analysis_complete = True
                             st.session_state.step_3_complete = True
                             
-                            # Convert hex colors to RGB tuples
-                            def hex_to_rgb(hex_color):
+                            # Convert hex colors to BGR tuples (OpenCV format)
+                            def hex_to_bgr(hex_color):
                                 hex_color = hex_color.lstrip('#')
-                                return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+                                # Convert to RGB first, then reverse to BGR for OpenCV
+                                rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+                                return (rgb[2], rgb[1], rgb[0])  # BGR format
                             
                             # Create overlay image for visualization  
                             vis_settings = {
@@ -837,9 +839,9 @@ def render_step_3_analysis():
                                 'background_alpha': background_alpha,
                                 'border_width': border_width,
                                 'line_width': line_width,
-                                'font_color': hex_to_rgb(font_color),
-                                'border_color': hex_to_rgb(border_color),
-                                'line_color': hex_to_rgb(line_color)
+                                'font_color': hex_to_bgr(font_color),
+                                'border_color': hex_to_bgr(border_color),
+                                'line_color': hex_to_bgr(line_color)
                             }
                             overlay_image = create_overlay_image(
                                 st.session_state.original_image,
@@ -905,10 +907,12 @@ def render_step_3_analysis():
                     
                     if st.button("🔄 Regenerate Overlay", key="regenerate_overlay"):
                         # Regenerate overlay with current settings
-                        # Convert hex colors to RGB tuples
-                        def hex_to_rgb(hex_color):
+                        # Convert hex colors to BGR tuples (OpenCV format)
+                        def hex_to_bgr(hex_color):
                             hex_color = hex_color.lstrip('#')
-                            return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+                            # Convert to RGB first, then reverse to BGR for OpenCV
+                            rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+                            return (rgb[2], rgb[1], rgb[0])  # BGR format
                         
                         vis_settings = {
                             'color_map': overlay_color_map,
@@ -919,9 +923,9 @@ def render_step_3_analysis():
                             'background_alpha': background_alpha,
                             'border_width': border_width,
                             'line_width': line_width,
-                            'font_color': hex_to_rgb(font_color),
-                            'border_color': hex_to_rgb(border_color),
-                            'line_color': hex_to_rgb(line_color)
+                            'font_color': hex_to_bgr(font_color),
+                            'border_color': hex_to_bgr(border_color),
+                            'line_color': hex_to_bgr(line_color)
                         }
                         new_overlay = create_overlay_image(
                             st.session_state.original_image,
