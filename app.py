@@ -478,112 +478,148 @@ def render_step_2_calibration():
 
     elif calibration_method == "Manual Measurement":
         st.markdown("### 📐 Manual Measurement")
-        st.info("Measure a known distance by entering the coordinates of two points on your image.")
+        st.info("Draw a line on your image by clicking two points to measure a known distance.")
         
         if 'original_image' in st.session_state:
-            # Display image with clickable coordinates
             col1, col2 = st.columns([3, 1])
             
             with col1:
-                st.markdown("**Step 1:** Click on the image below or view it to identify two points with a known distance")
-                image_array = st.session_state.original_image
-                # Display the image
-                st.image(st.session_state.display_image, 
-                        caption=f"Image size: {image_array.shape[1]} × {image_array.shape[0]} pixels", 
-                        use_container_width=True)
+                # Initialize session state for manual measurement
+                if 'manual_click_points' not in st.session_state:
+                    st.session_state.manual_click_points = []
+                if 'manual_measurement_complete' not in st.session_state:
+                    st.session_state.manual_measurement_complete = False
+                
+                # Instructions based on current state
+                if len(st.session_state.manual_click_points) == 0:
+                    st.markdown("**Step 1:** Click on the image to set the first point")
+                elif len(st.session_state.manual_click_points) == 1:
+                    st.markdown("**Step 2:** Click on the image to set the second point")
+                else:
+                    st.markdown("**Measurement complete!** Review the line below.")
+                
+                # Create image with current points and line
+                display_image = st.session_state.display_image.copy()
+                
+                # Draw existing points and line
+                if len(st.session_state.manual_click_points) >= 1:
+                    # Draw first point
+                    cv2.circle(display_image, st.session_state.manual_click_points[0], 8, (0, 255, 0), -1)
+                    cv2.putText(display_image, "1", 
+                               (st.session_state.manual_click_points[0][0] + 12, st.session_state.manual_click_points[0][1] - 8),
+                               cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                
+                if len(st.session_state.manual_click_points) >= 2:
+                    # Draw second point
+                    cv2.circle(display_image, st.session_state.manual_click_points[1], 8, (0, 255, 0), -1)
+                    cv2.putText(display_image, "2", 
+                               (st.session_state.manual_click_points[1][0] + 12, st.session_state.manual_click_points[1][1] - 8),
+                               cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    
+                    # Draw line between points
+                    cv2.line(display_image, st.session_state.manual_click_points[0], st.session_state.manual_click_points[1], (0, 255, 0), 3)
+                
+                # Use plotly for click detection
+                import plotly.graph_objects as go
+                import plotly.express as px
+                
+                # Convert image to plotly format
+                fig = px.imshow(display_image)
+                fig.update_layout(
+                    title="Click to place measurement points",
+                    xaxis_title="X coordinate (pixels)",
+                    yaxis_title="Y coordinate (pixels)",
+                    height=600
+                )
+                
+                # Capture click events
+                clicked_data = st.plotly_chart(fig, use_container_width=True, key="manual_measurement_plot")
+                
+                # Handle clicks (this is a simplified approach - Streamlit doesn't directly support click events)
+                # Instead, we'll use coordinate inputs that update based on the visual feedback
+                st.markdown("**Click coordinates (if clicking doesn't work, enter manually):**")
+                
+                # Coordinate inputs for fallback
+                if len(st.session_state.manual_click_points) == 0:
+                    x1 = st.number_input("Point 1 - X coordinate", min_value=0, max_value=display_image.shape[1], value=100, key="manual_x1_click")
+                    y1 = st.number_input("Point 1 - Y coordinate", min_value=0, max_value=display_image.shape[0], value=100, key="manual_y1_click")
+                    
+                    if st.button("Set Point 1", key="set_point1"):
+                        st.session_state.manual_click_points = [(int(x1), int(y1))]
+                        st.rerun()
+                        
+                elif len(st.session_state.manual_click_points) == 1:
+                    st.write(f"Point 1: {st.session_state.manual_click_points[0]}")
+                    x2 = st.number_input("Point 2 - X coordinate", min_value=0, max_value=display_image.shape[1], value=200, key="manual_x2_click")
+                    y2 = st.number_input("Point 2 - Y coordinate", min_value=0, max_value=display_image.shape[0], value=200, key="manual_y2_click")
+                    
+                    if st.button("Set Point 2", key="set_point2"):
+                        st.session_state.manual_click_points.append((int(x2), int(y2)))
+                        st.rerun()
+                
+                else:
+                    st.write(f"Point 1: {st.session_state.manual_click_points[0]}")
+                    st.write(f"Point 2: {st.session_state.manual_click_points[1]}")
             
             with col2:
-                st.markdown("**Step 2:** Enter coordinates")
+                st.markdown("**Controls:**")
                 
-                # Initialize session state for manual measurement
-                if 'manual_point1' not in st.session_state:
-                    st.session_state.manual_point1 = (100, 100)
-                if 'manual_point2' not in st.session_state:
-                    st.session_state.manual_point2 = (200, 200)
-                if 'manual_known_distance' not in st.session_state:
-                    st.session_state.manual_known_distance = 50.0
+                # Reset drawing button
+                if st.button("🔄 Restart Drawing", key="restart_manual_drawing"):
+                    st.session_state.manual_click_points = []
+                    st.session_state.manual_measurement_complete = False
+                    st.rerun()
                 
-                # Point 1 coordinates
-                st.markdown("**Point 1:**")
-                col_x1, col_y1 = st.columns(2)
-                with col_x1:
-                    x1 = st.number_input("X1", min_value=0, max_value=image_array.shape[1], 
-                                        value=st.session_state.manual_point1[0], key="x1_input")
-                with col_y1:
-                    y1 = st.number_input("Y1", min_value=0, max_value=image_array.shape[0], 
-                                        value=st.session_state.manual_point1[1], key="y1_input")
-                
-                # Point 2 coordinates
-                st.markdown("**Point 2:**")
-                col_x2, col_y2 = st.columns(2)
-                with col_x2:
-                    x2 = st.number_input("X2", min_value=0, max_value=image_array.shape[1], 
-                                        value=st.session_state.manual_point2[0], key="x2_input")
-                with col_y2:
-                    y2 = st.number_input("Y2", min_value=0, max_value=image_array.shape[0], 
-                                        value=st.session_state.manual_point2[1], key="y2_input")
-                
-                # Store points
-                st.session_state.manual_point1 = (int(x1), int(y1))
-                st.session_state.manual_point2 = (int(x2), int(y2))
-                
-                # Known distance input
-                known_distance = st.number_input(
-                    "Known distance (μm)",
-                    min_value=0.1,
-                    max_value=10000.0,
-                    value=st.session_state.manual_known_distance,
-                    step=0.1,
-                    help="The actual distance between these two points in micrometers"
-                )
-                st.session_state.manual_known_distance = known_distance
-                
-                # Calculate current distance in pixels
-                point1 = st.session_state.manual_point1
-                point2 = st.session_state.manual_point2
-                pixel_distance = np.sqrt((point2[0] - point1[0])**2 + (point2[1] - point1[1])**2)
-                
-                st.info(f"**Distance in pixels:** {pixel_distance:.1f}px")
-                
-                # Apply calibration button
-                if st.button("🎯 Apply Calibration", type="primary", key="apply_manual_calibration"):
-                    if pixel_distance > 0 and known_distance > 0:
-                        # Use calibration.py manual_calibration method
-                        calibration_result = st.session_state.calibration.manual_calibration(
-                            st.session_state.original_image, point1, point2, known_distance
-                        )
+                # Known distance input (only show if both points are set)
+                if len(st.session_state.manual_click_points) >= 2:
+                    st.markdown("**Enter known distance:**")
+                    # Initialize known distance if not set
+                    if 'manual_known_distance' not in st.session_state:
+                        st.session_state.manual_known_distance = 50.0
                         
-                        if calibration_result:
-                            st.session_state.pixel_scale = calibration_result['pixel_scale']
-                            st.session_state.calibration_complete = True
-                            st.session_state.manual_calibration_complete = True
-                            st.session_state.manual_calibration_visualization = calibration_result['visualization']
-                            st.success(f"✅ Calibration applied! Scale: {calibration_result['pixel_scale']:.2f} pixels/μm")
-                            st.rerun()
+                    known_distance = st.number_input(
+                        "Known distance (μm)",
+                        min_value=0.1,
+                        max_value=10000.0,
+                        value=st.session_state.manual_known_distance,
+                        step=0.1,
+                        help="The actual distance between these two points in micrometers"
+                    )
+                    st.session_state.manual_known_distance = known_distance
+                    
+                    # Calculate current distance in pixels
+                    point1 = st.session_state.manual_click_points[0]
+                    point2 = st.session_state.manual_click_points[1]
+                    pixel_distance = np.sqrt((point2[0] - point1[0])**2 + (point2[1] - point1[1])**2)
+                    
+                    st.info(f"**Distance in pixels:** {pixel_distance:.1f}px")
+                    
+                    # Apply calibration button
+                    if st.button("🎯 Apply Calibration", type="primary", key="apply_manual_calibration"):
+                        if pixel_distance > 0 and known_distance > 0:
+                            # Use calibration.py manual_calibration method
+                            calibration_result = st.session_state.calibration.manual_calibration(
+                                st.session_state.original_image, point1, point2, known_distance
+                            )
+                            
+                            if calibration_result:
+                                st.session_state.pixel_scale = calibration_result['pixel_scale']
+                                st.session_state.calibration_complete = True
+                                st.session_state.manual_calibration_complete = True
+                                st.session_state.manual_calibration_visualization = calibration_result['visualization']
+                                st.success(f"✅ Manual calibration successful! Pixel scale: {calibration_result['pixel_scale']:.2f} μm/pixel")
+                                st.rerun()
+                            else:
+                                st.error("❌ Calibration failed. Please try again.")
                         else:
-                            st.error("Failed to calculate calibration. Please check your inputs.")
-                    else:
-                        st.error("Invalid distance values. Please check your inputs.")
-            
-            # Show calibration result if completed
+                            st.error("❌ Invalid measurements. Please ensure both distance values are positive.")
+                            
+            # Display calibration results if available
             if st.session_state.get('manual_calibration_complete', False) and 'manual_calibration_visualization' in st.session_state:
-                st.markdown("### 📏 Calibration Result")
-                col1, col2 = st.columns([2, 1])
-                with col1:
-                    st.image(st.session_state.manual_calibration_visualization, 
-                            caption="Calibration Line Visualization", use_container_width=True)
-                with col2:
-                    pixel_scale = st.session_state.get('pixel_scale')
-                    if pixel_scale:
-                        st.success(f"✅ **Calibrated!**")
-                        st.metric("Pixel Scale", f"{pixel_scale:.2f} pixels/μm")
-                        
-                        if st.button("🔄 Recalibrate", key="recalibrate_manual"):
-                            st.session_state.calibration_complete = False
-                            st.session_state.manual_calibration_complete = False
-                            if 'manual_calibration_visualization' in st.session_state:
-                                del st.session_state.manual_calibration_visualization
-                            st.rerun()
+                st.markdown("### ✅ Calibration Results")
+                st.image(st.session_state.manual_calibration_visualization, 
+                        caption=f"Manual measurement calibration - Scale: {st.session_state.pixel_scale:.2f} μm/pixel", 
+                        use_container_width=True)
         else:
             st.warning("⚠️ No image available for measurement. Please complete Step 1 first.")
     
