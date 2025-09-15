@@ -341,35 +341,22 @@ def main():
 
         # Detection parameters
         st.subheader("Detection Parameters")
-        min_area = st.slider(
-            "Minimum Spore Area (μm²)",
+        area_range = st.slider(
+            "Spore Area Range (μm²)",
             min_value=1,
-            max_value=100,
-            value=10,
-            help="Minimum area for a detected object to be considered a spore")
-
-        max_area = st.slider(
-            "Maximum Spore Area (μm²)",
-            min_value=100,
             max_value=1000,
-            value=500,
-            help="Maximum area for a detected object to be considered a spore")
+            value=(10, 500),
+            help="Area range for objects to be considered spores")
+        min_area, max_area = area_range
 
-        circularity_min = st.slider(
-            "Minimum Circularity",
+        circularity_range = st.slider(
+            "Circularity Range",
             min_value=0.0,
             max_value=1.0,
-            value=0.3,
+            value=(0.3, 0.9),
             step=0.01,
-            help="Filter out linear objects (0.0 = line, 1.0 = perfect circle)"
-        )
-
-        circularity_max = st.slider("Maximum Circularity",
-                                    min_value=0.0,
-                                    max_value=1.0,
-                                    value=0.9,
-                                    step=0.01,
-                                    help="Filter out overly round objects")
+            help="Circularity range (0.0 = line, 1.0 = perfect circle)")
+        circularity_min, circularity_max = circularity_range
 
         exclude_edges = st.checkbox(
             "Exclude Edge Spores",
@@ -378,73 +365,41 @@ def main():
 
         # Enhanced shape filters - collapsible and collapsed by default
         with st.expander("Advanced Shape Filters", expanded=False):
-            aspect_ratio_min = st.slider(
-                "Minimum Aspect Ratio",
+            aspect_ratio_range = st.slider(
+                "Aspect Ratio Range",
                 min_value=1.0,
                 max_value=10.0,
-                value=1.0,
+                value=(1.0, 5.0),
                 step=0.1,
-                help=
-                "Minimum length/width ratio (1.0 = square, higher = more elongated)"
-            )
+                help="Length/width ratio range (1.0 = square, higher = more elongated)")
+            aspect_ratio_min, aspect_ratio_max = aspect_ratio_range
 
-            aspect_ratio_max = st.slider("Maximum Aspect Ratio",
-                                         min_value=1.0,
-                                         max_value=10.0,
-                                         value=5.0,
-                                         step=0.1,
-                                         help="Maximum length/width ratio")
-
-            solidity_min = st.slider(
-                "Minimum Solidity",
+            solidity_range = st.slider(
+                "Solidity Range",
                 min_value=0.0,
                 max_value=1.0,
-                value=0.5,
+                value=(0.5, 1.0),
                 step=0.01,
-                help=
-                "Minimum solidity (spore area / convex hull area). Higher = less concave"
-            )
+                help="Solidity range (spore area / convex hull area). Higher = less concave")
+            solidity_min, solidity_max = solidity_range
 
-            solidity_max = st.slider("Maximum Solidity",
-                                     min_value=0.0,
-                                     max_value=1.0,
-                                     value=1.0,
-                                     step=0.01,
-                                     help="Maximum solidity")
-
-            convexity_min = st.slider(
-                "Minimum Convexity",
+            convexity_range = st.slider(
+                "Convexity Range",
                 min_value=0.0,
                 max_value=1.0,
-                value=0.7,
+                value=(0.7, 1.0),
                 step=0.01,
-                help=
-                "Minimum convexity (convex hull perimeter / spore perimeter). Higher = smoother outline"
-            )
+                help="Convexity range (convex hull perimeter / spore perimeter). Higher = smoother outline")
+            convexity_min, convexity_max = convexity_range
 
-            convexity_max = st.slider("Maximum Convexity",
-                                      min_value=0.0,
-                                      max_value=1.0,
-                                      value=1.0,
-                                      step=0.01,
-                                      help="Maximum convexity")
-
-            extent_min = st.slider(
-                "Minimum Extent",
+            extent_range = st.slider(
+                "Extent Range",
                 min_value=0.0,
                 max_value=1.0,
-                value=0.3,
+                value=(0.3, 1.0),
                 step=0.01,
-                help=
-                "Minimum extent (spore area / bounding rectangle area). Higher = fills bounding box better"
-            )
-
-            extent_max = st.slider("Maximum Extent",
-                                   min_value=0.0,
-                                   max_value=1.0,
-                                   value=1.0,
-                                   step=0.01,
-                                   help="Maximum extent")
+                help="Extent range (spore area / bounding rectangle area). Higher = fills bounding box better")
+            extent_min, extent_max = extent_range
 
             # Touching spore detection
             st.markdown("**🔍 Touching Spore Detection**")
@@ -753,18 +708,24 @@ def main():
             st.session_state.display_image = image_array
 
     # Display image if we have one in session state (persist during reloads)
-    if st.session_state.get('image_uploaded', False) and 'original_image' in st.session_state:
+    if st.session_state.get('image_uploaded',
+                            False) and 'original_image' in st.session_state:
         # Main content area - two columns for image display
         col1, col2 = st.columns([1, 1])
 
         with col1:
             st.subheader("Original Image")
             # Always show the image from session state
-            display_image = st.session_state.get('display_image', st.session_state.original_image)
+            display_image = st.session_state.get(
+                'display_image', st.session_state.original_image)
             if st.session_state.get('image_source') == "file":
-                st.image(display_image, caption="Original Image", width='stretch')
+                st.image(display_image,
+                         caption="Original Image",
+                         width='stretch')
             else:  # iNaturalist URL
-                st.image(display_image, caption="iNaturalist Image", width='stretch')
+                st.image(display_image,
+                         caption="iNaturalist Image",
+                         width='stretch')
         # Auto-calibration and analysis controls
         if calibration_method in [
                 "Auto-Detect Scale Bar", "Auto-Detect Circular Object"
@@ -789,7 +750,8 @@ def main():
                     with st.spinner(
                             "Detecting calibration reference in image..."):
                         calibration_result = st.session_state.calibration.auto_detect_scale(
-                            st.session_state.original_image, ref_type, known_ref_length)
+                            st.session_state.original_image, ref_type,
+                            known_ref_length)
 
                         if calibration_result['pixel_scale']:
                             # Validate calibration results
@@ -827,7 +789,7 @@ def main():
 
         # Use stored image for analysis (persistent during reloads)
         analysis_image = st.session_state.original_image
-        
+
         # Automatic analysis when image is uploaded
         with st.spinner("Analyzing spores..."):
             # Configure analyzer
@@ -871,36 +833,25 @@ def main():
     if st.session_state.analysis_complete and st.session_state.selected_spores:
         # Spore selection interface - collapsible and default collapsed
         with st.expander("✅ Spore Selection", expanded=False):
-            st.write("Click badges to include/exclude spores from analysis:")
-            
-            # Create a grid of badge-style buttons for spore selection
+            st.write(
+                "Click checkboxes to include/exclude spores from analysis:")
+
+            # Create a grid of checkboxes for spore selection
             results = st.session_state.analysis_results
-            cols = st.columns(6)  # More columns for compact badge layout
+            cols = st.columns(5)
 
             for i, spore in enumerate(results):
-                col_idx = i % 6
+                col_idx = i % 5
                 with cols[col_idx]:
-                    is_selected = i in st.session_state.selected_spores
-                    
-                    # Create badge button with visual indicators
-                    if is_selected:
-                        button_text = f"✅ {i+1}"
-                        button_type = "primary"
-                    else:
-                        button_text = f"⚪ {i+1}"
-                        button_type = "secondary"
-                    
-                    # Use button with dynamic styling and handle click
-                    if st.button(button_text,
-                                key=f"spore_badge_{i}",
-                                type=button_type,
-                                help=f"Spore {i+1} - Click to {'deselect' if is_selected else 'select'}",
-                                use_container_width=True):
-                        if is_selected:
-                            st.session_state.selected_spores.remove(i)
-                        else:
-                            st.session_state.selected_spores.add(i)
-                        st.rerun()
+                    is_selected = st.checkbox(
+                        f"Spore {i+1}",
+                        value=i in st.session_state.selected_spores,
+                        key=f"spore_{i}")
+
+                    if is_selected and i not in st.session_state.selected_spores:
+                        st.session_state.selected_spores.add(i)
+                    elif not is_selected and i in st.session_state.selected_spores:
+                        st.session_state.selected_spores.remove(i)
 
     # Now populate the right column with updated overlay image after spore selection is processed
     if st.session_state.analysis_complete and 'right_col_placeholder' in st.session_state:
@@ -940,7 +891,7 @@ def main():
         # Show loading placeholder in right column
         with st.session_state.right_col_placeholder.container():
             st.info("🔄 Analysis in progress...")
-            
+
             # Create skeleton placeholder for image
             st.markdown("""
             <div style="
@@ -964,7 +915,8 @@ def main():
                 100% { background-position: -200% 0; }
             }
             </style>
-            """, unsafe_allow_html=True)
+            """,
+                        unsafe_allow_html=True)
 
     # Statistics and results section
     if st.session_state.analysis_complete and st.session_state.selected_spores:
