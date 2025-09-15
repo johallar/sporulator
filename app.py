@@ -832,7 +832,7 @@ def render_step_3_analysis():
                                 'color_map': overlay_color_map,
                                 'show_labels': show_labels,
                                 'show_measurements': show_measurements,
-                                'label_fontsize': label_fontsize,
+                                'font_size': label_fontsize,  # Use label_fontsize as the main font_size
                                 'measurement_fontsize': measurement_fontsize,
                                 'background_alpha': background_alpha,
                                 'border_width': border_width,
@@ -914,7 +914,7 @@ def render_step_3_analysis():
                             'color_map': overlay_color_map,
                             'show_labels': show_labels,
                             'show_measurements': show_measurements,
-                            'label_fontsize': label_fontsize,
+                            'font_size': label_fontsize,  # Use label_fontsize as the main font_size
                             'measurement_fontsize': measurement_fontsize,
                             'background_alpha': background_alpha,
                             'border_width': border_width,
