@@ -1102,13 +1102,17 @@ def main():
         elif st.session_state.current_step == 2:
             st.markdown("**🎯 Current Focus:**")
             st.info("Set up pixel scale calibration")
-            if 'pixel_scale' in st.session_state:
+            if 'pixel_scale' in st.session_state and st.session_state.pixel_scale is not None:
                 st.write(f"**Current Scale:** {st.session_state.pixel_scale:.2f} px/μm")
+            else:
+                st.write("**Current Scale:** Not calibrated yet")
         elif st.session_state.current_step == 3:
             st.markdown("**🎯 Current Focus:**")
             st.info("Configure analysis parameters and run detection")
-            if 'pixel_scale' in st.session_state:
+            if 'pixel_scale' in st.session_state and st.session_state.pixel_scale is not None:
                 st.write(f"**Scale:** {st.session_state.pixel_scale:.2f} px/μm")
+            else:
+                st.write("**Scale:** Not calibrated")
             if 'original_image' in st.session_state:
                 img = st.session_state.original_image
                 st.write(f"**Image:** {img.shape[1]}×{img.shape[0]} px")
