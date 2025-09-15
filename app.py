@@ -574,8 +574,25 @@ def render_step_2_calibration():
                 'displayModeBar': True
             }
             
-            # Display the interactive plot with drawing tools
-            chart_placeholder = st.plotly_chart(fig, use_container_width=False, config=config, key="measurement_plot")
+            # Display the interactive plot with drawing tools and capture events
+            from streamlit_plotly_events import plotly_events
+            
+            # Store shapes in session state to persist them
+            if 'plot_shapes' not in st.session_state:
+                st.session_state.plot_shapes = []
+            
+            # Add any existing shapes to the figure
+            if st.session_state.plot_shapes:
+                for shape in st.session_state.plot_shapes:
+                    fig.add_shape(shape)
+            
+            selected_data = plotly_events(
+                fig, 
+                click_event=False, 
+                hover_event=False, 
+                select_event=True,
+                key="measurement_plot"
+            )
             
             # Instructions and capture button
             col1, col2 = st.columns([2, 1])
@@ -585,11 +602,36 @@ def render_step_2_calibration():
             
             with col2:
                 if st.button("📏 Capture Drawn Line", type="primary", key="capture_line_btn"):
-                    # Store dummy coordinates for now - this will trigger the measurement section
-                    if not st.session_state.manual_line_coords:
-                        st.session_state.manual_line_coords = (100, 100, 300, 200)  # Default coordinates
-                        st.warning("⚠️ Using default coordinates since automatic capture isn't available. Please use manual coordinate entry below.")
-                        st.rerun()
+                    # Try to extract coordinates from the figure's layout shapes
+                    try:
+                        # Get the current figure layout - the drawn shapes should be here
+                        current_shapes = fig.layout.shapes if hasattr(fig.layout, 'shapes') else []
+                        
+                        if current_shapes and len(current_shapes) > 0:
+                            # Get the last drawn shape (most recent line)
+                            last_shape = current_shapes[-1]
+                            
+                            if hasattr(last_shape, 'type') and last_shape.type == 'line':
+                                # Extract line coordinates
+                                x1 = int(last_shape.x0) if hasattr(last_shape, 'x0') else 100
+                                y1 = int(last_shape.y0) if hasattr(last_shape, 'y0') else 100
+                                x2 = int(last_shape.x1) if hasattr(last_shape, 'x1') else 300
+                                y2 = int(last_shape.y1) if hasattr(last_shape, 'y1') else 200
+                                
+                                # Store the captured coordinates
+                                st.session_state.manual_line_coords = (x1, y1, x2, y2)
+                                st.session_state.plot_shapes = list(current_shapes)  # Store shapes
+                                st.success(f"✅ **Line captured!** Coordinates: ({x1}, {y1}) to ({x2}, {y2})")
+                                st.rerun()
+                            else:
+                                st.warning("⚠️ Please draw a line using the line drawing tool first")
+                        else:
+                            # Fallback: Ask user to use manual coordinates
+                            st.warning("⚠️ No drawn line detected. Please use the manual coordinate entry below or try drawing again.")
+                            
+                    except Exception as e:
+                        st.error(f"❌ Error capturing line: {str(e)}")
+                        st.info("💡 Please use the manual coordinate entry below as a fallback.")
             
             # Show current line status
             if st.session_state.manual_line_coords:
