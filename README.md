@@ -1,199 +1,292 @@
-# Fungal Spore Analyzer - Technical Documentation
+# Fungal Spore Analyzer
 
-## Overview
+A comprehensive web-based application for automated detection and measurement of fungal spores in microscopy images. This tool provides computer vision capabilities to analyze spore morphology, calculate statistical measurements, and export results for research purposes.
 
-The Fungal Spore Analyzer is a sophisticated computer vision application designed for automated detection, measurement, and analysis of fungal spores in microscopy images. The system combines traditional image processing techniques with advanced segmentation algorithms to provide accurate morphological measurements for mycological research.
+![Fungal Spore Analyzer](https://img.shields.io/badge/Python-3.11+-blue.svg)
+![Streamlit](https://img.shields.io/badge/Streamlit-1.49+-red.svg)
+![OpenCV](https://img.shields.io/badge/OpenCV-4.11+-green.svg)
 
-## Core Technologies
+## 🔬 Features
 
-### Computer Vision Pipeline
+- **Automated Spore Detection**: Advanced computer vision algorithms with optional YOLO deep learning models
+- **Interactive Calibration**: Multiple calibration methods including manual entry and auto-detect micrometer divisions
+- **Watershed Segmentation**: Automatically separates touching or overlapping spores
+- **Comprehensive Measurements**: Length, width, area, circularity, aspect ratio, and shape descriptors
+- **iNaturalist Integration**: Direct image loading from iNaturalist observations
+- **Interactive Visualization**: Plotly-based charts and overlay generation
+- **Export Capabilities**: CSV and Excel export with mycological statistics format
+- **Quality Filtering**: Configurable filters for area, circularity, and aspect ratio
 
-#### 1. Image Preprocessing
-- **Gaussian Blur**: Reduces noise while preserving edge information using configurable kernel sizes (3x3 to 15x15)
-- **Adaptive Thresholding**: Multiple methods available:
-  - Otsu's method for automatic threshold selection
-  - Manual threshold control for challenging samples
-  - Binary image conversion optimized for microscopy images
+## 🛠️ Prerequisites
 
-#### 2. Contour Detection and Analysis
-- **OpenCV Contour Finding**: Uses `cv2.findContours()` with optimized parameters
-- **Hierarchical Analysis**: Employs `cv2.RETR_EXTERNAL` to focus on outer boundaries
-- **Contour Approximation**: `cv2.CHAIN_APPROX_SIMPLE` for efficient boundary representation
+Before running this application locally, ensure you have the following installed:
 
-### Advanced Spore Detection
+### Required Software
+- **Python 3.11 or higher** - [Download Python](https://www.python.org/downloads/)
+- **Git** - [Download Git](https://git-scm.com/downloads/)
 
-#### Traditional Computer Vision Method
-- **Edge Detection**: Canny edge detection with adaptive thresholds
-- **Morphological Operations**: 
-  - Opening operations to separate touching objects
-  - Closing operations to fill small gaps
-  - Erosion and dilation for noise reduction
+### System Requirements
+- **Operating System**: Windows 10+, macOS 10.14+, or Linux (Ubuntu 18.04+)
+- **Memory**: Minimum 4GB RAM (8GB recommended for large images)
+- **Storage**: At least 2GB free disk space
 
-#### Deep Learning Integration (Optional)
-- **YOLO Segmentation**: Support for ONNX-format YOLO models
-- **Instance Segmentation**: Pixel-level spore identification
-- **Confidence Scoring**: Automated quality assessment of detections
+## 📦 Installation
 
-### Watershed Segmentation for Touching Spores
+### 1. Clone the Repository
 
-One of the system's most advanced features is the automatic separation of touching or overlapping spores using watershed segmentation:
-
-#### Algorithm Implementation
-1. **Distance Transform**: Uses `cv2.distanceTransform()` to create a distance map
-2. **Local Maxima Detection**: Employs `scipy.ndimage.maximum_filter` to find watershed seeds
-3. **Gaussian Smoothing**: Optional smoothing parameter for improved separation
-4. **Morphological Preprocessing**: Configurable erosion to thin connected regions
-
-#### Touching Spore Detection Criteria
-The system uses a multi-metric approach to identify potentially touching spores:
-
-**Hard Rules:**
-- Solidity < 0.85 with deep convexity defects
-- Multiple deep convexity defects (≥2)
-- Low convexity (<0.90) combined with poor ellipse fit
-- Statistical area outliers using robust z-scores
-
-**Score-Based Detection:**
-```
-Composite Score = 0.4 × max(0, 0.9 - solidity) + 
-                  0.2 × max(0, 0.95 - convexity) + 
-                  0.3 × min(1, deep_defects / 2) + 
-                  0.1 × ellipse_residual
+```bash
+git clone <repository-url>
+cd fungal-spore-analyzer
 ```
 
-**Aggressiveness Levels:**
-- Conservative: threshold = 0.6 (fewer separations)
-- Balanced: threshold = 0.5 (default)
-- Aggressive: threshold = 0.4 (more separations)
+### 2. Create a Virtual Environment (Recommended)
 
-### Morphological Measurements
+#### Using venv (Python built-in):
+```bash
+# Create virtual environment
+python -m venv spore_analyzer_env
 
-#### Primary Measurements
-- **Length and Width**: Fitted ellipse major and minor axes
-- **Area**: Pixel count converted to square micrometers
-- **Perimeter**: Contour boundary length
-- **Aspect Ratio**: Length-to-width ratio for shape classification
+# Activate virtual environment
+# On Windows:
+spore_analyzer_env\Scripts\activate
+# On macOS/Linux:
+source spore_analyzer_env/bin/activate
+```
 
-#### Shape Descriptors
-- **Circularity**: `4π × Area / Perimeter²` (0-1, where 1 = perfect circle)
-- **Solidity**: `Contour Area / Convex Hull Area` (measures concavity)
-- **Convexity**: `Convex Hull Perimeter / Contour Perimeter` (boundary smoothness)
-- **Extent**: `Contour Area / Bounding Rectangle Area` (space efficiency)
+#### Using conda (if you have Anaconda/Miniconda):
+```bash
+# Create virtual environment
+conda create -n spore_analyzer python=3.11
+conda activate spore_analyzer
+```
 
-#### Advanced Shape Analysis
-- **Convexity Defects**: Identifies indentations suggesting merged spores
-- **Ellipse Fitting**: Least squares ellipse fitting with residual analysis
-- **Moment Analysis**: Statistical moments for shape characterization
+### 3. Install Dependencies
 
-### Calibration Systems
+#### Option A: Using pip (recommended)
+```bash
+pip install --upgrade pip
+pip install -r requirements.txt
+```
 
-#### Automatic Scale Detection
-- **Scale Bar Recognition**: Computer vision detection of embedded scale bars
-- **Known Object Calibration**: Reference objects of known dimensions
-- **Hough Transform**: Line detection for scale bar identification
-- **Template Matching**: Pattern recognition for standard scale markers
+If `requirements.txt` doesn't exist, install directly from `pyproject.toml`:
+```bash
+pip install numpy>=2.3.3 onnxruntime>=1.22.1 opencv-python>=4.11.0.86 opencv-python-headless>=4.11.0.86 openpyxl>=3.1.5 pandas>=2.3.2 pillow>=11.3.0 plotly>=6.3.0 requests>=2.32.5 scikit-image>=0.25.2 scipy>=1.16.1 streamlit-plotly-events>=0.0.6 streamlit>=1.49.1
+```
 
-#### Manual Calibration
-- **Interactive Point Selection**: User-defined reference measurements
-- **Validation Systems**: Automatic verification of calibration accuracy
-- **Multiple Unit Support**: Micrometers, nanometers, millimeters
+#### Option B: Using uv (if you have uv installed)
+```bash
+uv sync
+```
 
-### Quality Filtering
+### 4. Create Configuration Directory
 
-#### Multi-Parameter Filtering
-- **Area Range**: Configurable minimum and maximum spore sizes
-- **Shape Constraints**: Circularity, aspect ratio, and solidity limits
-- **Edge Exclusion**: Removes partially visible spores at image boundaries
-- **Statistical Outliers**: Robust z-score filtering for anomalous measurements
+Create the Streamlit configuration directory and file:
 
-#### Touching Spore Handling
-- **Detection**: Multi-metric identification of merged spores
-- **Separation**: Watershed segmentation to split touching objects
-- **Validation**: Quality assessment of separated components
+```bash
+mkdir -p .streamlit
+```
 
-### Statistical Analysis
+Create `.streamlit/config.toml` with the following content:
+```toml
+[server]
+headless = true
+address = "0.0.0.0"
+port = 5000
 
-#### Descriptive Statistics
-- Mean, median, standard deviation for all measurements
-- Minimum, maximum, and percentile calculations
-- Sample size and measurement confidence intervals
+[theme]
+base = "light"
+primaryColor = "#b67feb"
+```
 
-#### Mycological Reporting
-- **Standardized Format**: Research-grade statistical summaries
-- **Dimensional Analysis**: Length × width format common in taxonomy
-- **Population Metrics**: Distribution analysis and outlier identification
+## 🚀 Running the Application
 
-### Visualization System
+### Start the Application
 
-#### Overlay Generation
-- **Measurement Lines**: Visual representation of length and width
-- **Multi-line Labels**: Spore number with measurements on separate lines
-- **Connecting Lines**: Links between labels and corresponding spores
-- **Color Coding**: Selected vs. unselected spore differentiation
+```bash
+streamlit run app.py --server.port 5000
+```
 
-#### Anti-Collision System
-- **Global Text Positioning**: Prevents overlap between all text elements
-- **Smart Positioning**: Automatic placement around spore boundaries
-- **Boundary Detection**: Ensures text remains within image bounds
-- **Background Styling**: Semi-transparent backgrounds for readability
+### Alternative Startup Methods
 
-## Technical Implementation
+#### Using Python directly:
+```bash
+python -m streamlit run app.py --server.port 5000
+```
 
-### Software Architecture
-- **Modular Design**: Separate detector backends for extensibility
-- **Abstract Interfaces**: Consistent API across detection methods
-- **Session Management**: Streamlit state handling for user interactions
-- **Error Handling**: Graceful degradation for edge cases
+#### With custom port:
+```bash
+streamlit run app.py --server.port 8080
+```
 
-### Performance Optimizations
-- **Vectorized Operations**: NumPy and OpenCV optimizations
-- **Memory Management**: Efficient image processing pipelines
-- **Caching**: Reuse of expensive computations
-- **Batch Processing**: Efficient handling of multiple spores
+### Access the Application
 
-### Dependencies
-- **Core**: OpenCV, NumPy, SciPy, scikit-image
-- **Visualization**: Matplotlib, Plotly, Streamlit
-- **Data Processing**: Pandas for statistical analysis
-- **Optional**: ONNX Runtime for deep learning models
+Once started, the application will be available at:
+- **Local URL**: http://localhost:5000
+- **Network URL**: http://your-ip-address:5000
 
-## Research Applications
+The terminal will display both URLs when the application starts successfully.
 
-### Mycological Studies
-- **Species Identification**: Morphometric analysis for taxonomy
-- **Population Studies**: Statistical analysis of spore populations
-- **Quality Control**: Standardized measurement protocols
-- **Comparative Analysis**: Cross-sample statistical comparisons
+## 📋 Usage Instructions
+
+### 1. Image Source (Step 1)
+- **Upload Image**: Use the file uploader to select microscopy images (JPG, PNG, TIFF)
+- **iNaturalist Integration**: Enter an observation ID to load images directly from iNaturalist
+- **Image Requirements**: High-contrast, well-focused microscopy images work best
+
+### 2. Calibration (Step 2)
+Choose one of the calibration methods:
+
+#### Manual Entry
+- Enter the pixel-to-micrometer conversion ratio manually
+- Useful when you know the exact scale from microscope settings
+
+#### Auto-detect Micrometer Divisions
+- Upload an image with visible micrometer scale divisions
+- The system will automatically detect and calibrate the scale
+- Works best with clear, high-contrast scale markings
+
+### 3. Analysis (Step 3)
+- **Configure Detection Parameters**: Adjust area filters, circularity, and shape constraints
+- **Choose Detection Method**: Traditional computer vision or YOLO deep learning (if model available)
+- **Enable Watershed Separation**: Automatically separate touching spores
+- **Run Analysis**: Process the image and view detected spores
+- **Review Results**: Use the interactive spore legend to select/deselect individual spores
+- **Export Data**: Download results as CSV or Excel files
+
+## 🔧 Configuration Options
+
+### Detection Parameters
+- **Area Range**: Minimum and maximum spore size (in pixels or micrometers)
+- **Circularity Filter**: Shape constraint (0.0 = any shape, 1.0 = perfect circle)
+- **Aspect Ratio**: Length-to-width ratio limits
+- **Edge Exclusion**: Remove partially visible spores at image borders
+
+### Watershed Separation
+- **Aggressiveness**: Conservative, Balanced, or Aggressive separation
+- **Smoothing**: Gaussian smoothing for improved separation
+- **Erosion Cycles**: Morphological preprocessing for connected regions
+
+### Export Settings
+- **Measurement Units**: Micrometers, millimeters, or pixels
+- **Statistical Format**: Include mycological summary statistics
+- **Image Overlays**: Export annotated images with measurements
+
+## 🐛 Troubleshooting
+
+### Common Installation Issues
+
+#### OpenCV Installation Problems:
+```bash
+# If opencv-python fails to install:
+pip install --upgrade pip setuptools wheel
+pip install opencv-python-headless opencv-python
+```
+
+#### Memory Issues with Large Images:
+- Resize images to maximum 2048x2048 pixels before upload
+- Close other applications to free memory
+- Consider using a machine with more RAM
+
+#### Port Already in Use:
+```bash
+# Try a different port:
+streamlit run app.py --server.port 8080
+```
+
+### Application Issues
+
+#### No Spores Detected:
+- Check image contrast and focus quality
+- Adjust area range filters (try wider ranges)
+- Reduce circularity filter threshold
+- Ensure proper calibration
+
+#### Too Many False Detections:
+- Increase minimum area threshold
+- Tighten circularity filter (closer to 1.0)
+- Enable edge exclusion
+- Adjust aspect ratio limits
+
+#### Calibration Problems:
+- Verify scale bar visibility and contrast
+- Check reference distance accuracy
+- Try manual calibration as fallback
+- Ensure image contains clear scale markers
+
+### Performance Issues
+
+#### Slow Processing:
+- Reduce image size before upload
+- Disable watershed separation for faster processing
+- Use traditional CV method instead of YOLO
+- Close browser tabs and other applications
+
+## 📁 Project Structure
+
+```
+fungal-spore-analyzer/
+├── app.py                  # Main Streamlit application
+├── spore_analyzer.py       # Core analysis engine
+├── calibration.py          # Calibration system
+├── utils.py               # Utility functions
+├── pyproject.toml         # Python dependencies
+├── .streamlit/
+│   └── config.toml        # Streamlit configuration
+├── attached_assets/       # Sample images and assets
+└── README.md             # This file
+```
+
+## 🔬 Technical Details
+
+### Core Technologies
+- **Streamlit**: Web application framework
+- **OpenCV**: Computer vision and image processing
+- **NumPy & SciPy**: Numerical computing and scientific algorithms
+- **Plotly**: Interactive visualizations and charts
+- **Pandas**: Data manipulation and statistical analysis
+- **scikit-image**: Advanced image processing algorithms
+
+### Detection Methods
+- **Traditional CV**: Edge detection, morphological operations, and contour analysis
+- **YOLO Segmentation**: Deep learning models for enhanced detection (optional)
+- **Watershed Segmentation**: Separation of touching or overlapping spores
 
 ### Measurement Accuracy
-- **Pixel-Level Precision**: Sub-pixel accuracy through interpolation
-- **Calibration Validation**: Automatic verification systems
-- **Reproducibility**: Consistent measurements across sessions
-- **Error Quantification**: Statistical confidence intervals
+- Sub-pixel precision through interpolation and ellipse fitting
+- Automatic calibration validation
+- Statistical confidence intervals for measurements
 
-## Usage Guidelines
+## 🤝 Contributing
 
-### Best Practices
-1. **Image Quality**: High-contrast, well-focused microscopy images
-2. **Calibration**: Always verify scale accuracy before analysis
-3. **Parameter Tuning**: Adjust filters based on sample characteristics
-4. **Quality Review**: Manual verification of automated detections
+To contribute to this project:
 
-### Troubleshooting
-- **Under-detection**: Reduce minimum area, adjust circularity filters
-- **Over-detection**: Increase filtering stringency, enable edge exclusion
-- **Poor Separation**: Adjust watershed parameters, try different aggressiveness
-- **Calibration Issues**: Verify scale bar visibility, check reference dimensions
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-## Future Enhancements
+## 📄 License
 
-### Planned Features
-- **3D Analysis**: Support for z-stack image analysis
-- **Machine Learning**: Custom model training for specific spore types
-- **Batch Processing**: Automated analysis of image series
-- **Advanced Statistics**: Multivariate analysis and clustering
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-### Research Integration
-- **Database Connectivity**: Direct integration with specimen databases
-- **Export Formats**: Additional formats for research software compatibility
-- **API Development**: Programmatic access for research pipelines
+## 🆘 Support
+
+If you encounter issues:
+
+1. Check this README for troubleshooting steps
+2. Review the terminal output for error messages
+3. Ensure all dependencies are properly installed
+4. Try with different image samples to isolate issues
+
+## 🔮 Future Enhancements
+
+- 3D analysis for z-stack images
+- Custom model training for specific spore types
+- Batch processing for multiple images
+- Advanced statistical analysis and clustering
+- Database integration for specimen management
+
+---
+
+**Happy Spore Analysis!** 🔬✨
