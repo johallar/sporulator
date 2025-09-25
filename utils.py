@@ -62,20 +62,48 @@ def calculate_statistics(spore_results):
 
     return stats
 
-
-def generate_mycological_summary(selected_results):
+def generate_q_value_summary(selected_results):
     """Generate mycological summary in the standard format"""
     if not selected_results:
         return "No spores selected for analysis."
 
     lengths = [spore['length_um'] for spore in selected_results]
-    widths = [spore['width_um'] for spore in selected_results]
     aspect_ratios = [spore['aspect_ratio'] for spore in selected_results]
 
     # Sort to get quartiles and extremes
     lengths_sorted = sorted(lengths)
-    widths_sorted = sorted(widths)
     aspect_ratios_sorted = sorted(aspect_ratios)
+
+    n = len(lengths_sorted)
+
+    # Calculate quartiles (25th and 75th percentile) for the main range
+    q1_idx = int(n * 0.25)
+    q3_idx = int(n * 0.75)
+
+    # Aspect ratio statistics
+    aspect_min = min(aspect_ratios)
+    aspect_q1 = aspect_ratios_sorted[q1_idx]
+    aspect_q3 = aspect_ratios_sorted[q3_idx]
+    aspect_max = max(aspect_ratios)
+    aspect_mean = sum(aspect_ratios) / len(aspect_ratios)
+    aspect_std = (sum(
+        (x - aspect_mean)**2 for x in aspect_ratios) / len(aspect_ratios))**0.5
+    summary = f"**Q value (length/width ratio):**\n\n"
+    summary += f"Q = ({aspect_min:.1f}–) {aspect_q1:.1f}–{aspect_q3:.1f} (–{aspect_max:.1f}), "
+    summary += f"Qm = {aspect_mean:.1f} ± {aspect_std:.1f}\n\n"
+    return summary
+
+def generate_dimensions_summary(selected_results):
+    """Generate spore dimension summary in the standard format"""
+    if not selected_results:
+        return "No spores selected for analysis."
+
+    lengths = [spore['length_um'] for spore in selected_results]
+    widths = [spore['width_um'] for spore in selected_results]
+
+    # Sort to get quartiles and extremes
+    lengths_sorted = sorted(lengths)
+    widths_sorted = sorted(widths)
 
     n = len(lengths_sorted)
 
@@ -95,25 +123,10 @@ def generate_mycological_summary(selected_results):
     width_q3 = widths_sorted[q3_idx]
     width_max = max(widths)
 
-    # Aspect ratio statistics
-    aspect_min = min(aspect_ratios)
-    aspect_q1 = aspect_ratios_sorted[q1_idx]
-    aspect_q3 = aspect_ratios_sorted[q3_idx]
-    aspect_max = max(aspect_ratios)
-    aspect_mean = sum(aspect_ratios) / len(aspect_ratios)
-    aspect_std = (sum(
-        (x - aspect_mean)**2 for x in aspect_ratios) / len(aspect_ratios))**0.5
-
     # Format the mycological summary
     summary = f"**Spore dimensions:**\n\n"
-    summary += f"({length_min:.1f}–) {length_q1:.1f}–{length_q3:.1f} (–{length_max:.1f}) × "
-    summary += f"({width_min:.1f}–) {width_q1:.1f}–{width_q3:.1f} (–{width_max:.1f}) µm\n\n"
-    summary += f"**Q value (length/width ratio):**\n\n"
-    summary += f"Q = ({aspect_min:.1f}–) {aspect_q1:.1f}–{aspect_q3:.1f} (–{aspect_max:.1f}), "
-    summary += f"Qm = {aspect_mean:.1f} ± {aspect_std:.1f}\n\n"
-    summary += f"**Interpretation:**\n\n"
-    summary += f"Most spores are {length_q1:.1f}–{length_q3:.1f} by {width_q1:.1f}–{width_q3:.1f} µm, "
-    summary += f"with rare extremes down to {length_min:.1f} × {width_min:.1f} and up to {length_max:.1f} × {width_max:.1f} µm."
+    summary += f"({length_min:.1f}) {length_q1:.1f}–{length_q3:.1f} ({length_max:.1f}) × "
+    summary += f"({width_min:.1f}) {width_q1:.1f}–{width_q3:.1f} ({width_max:.1f}) µm\n\n"
     return summary
 
 
@@ -393,7 +406,7 @@ def create_overlay_image(original_image,
             width_90th = np.percentile(widths, 90)
             
             # Create mycological format dimension string (using ASCII characters for OpenCV compatibility)
-            dimension_str = f"({length_min:.1f}-) {length_10th:.1f}-{length_90th:.1f} (-{length_max:.1f}) x ({width_min:.1f}-) {width_10th:.1f}-{width_90th:.1f} (-{width_max:.1f}) um"
+            dimension_str = f"({length_min:.1f}) {length_10th:.1f}-{length_90th:.1f} ({length_max:.1f}) x ({width_min:.1f}) {width_10th:.1f}-{width_90th:.1f} ({width_max:.1f}) um"
             
             # Create legend text lines with mycological format (ASCII only)
             legend_lines = [
@@ -407,8 +420,8 @@ def create_overlay_image(original_image,
         legend_lines = ["Units: micrometers (um)"]
 
     # Increased font size
-    legend_font_scale = 0.9
-    legend_thickness = 2
+    legend_font_scale = settings["measurement_fontsize"] if "measurement_fontsize" in settings else 1.4
+    legend_thickness = 4
     line_spacing = 25
     
     # Calculate maximum text width and total height

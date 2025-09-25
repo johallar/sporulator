@@ -22,10 +22,12 @@ A comprehensive web-based application for automated detection and measurement of
 Before running this application locally, ensure you have the following installed:
 
 ### Required Software
+
 - **Python 3.11 or higher** - [Download Python](https://www.python.org/downloads/)
 - **Git** - [Download Git](https://git-scm.com/downloads/)
 
 ### System Requirements
+
 - **Operating System**: Windows 10+, macOS 10.14+, or Linux (Ubuntu 18.04+)
 - **Memory**: Minimum 4GB RAM (8GB recommended for large images)
 - **Storage**: At least 2GB free disk space
@@ -39,47 +41,21 @@ git clone <repository-url>
 cd fungal-spore-analyzer
 ```
 
-### 2. Create a Virtual Environment (Recommended)
+### 2. Install Dependencies
 
-#### Using venv (Python built-in):
-```bash
-# Create virtual environment
-python -m venv spore_analyzer_env
+#### UV
 
-# Activate virtual environment
-# On Windows:
-spore_analyzer_env\Scripts\activate
-# On macOS/Linux:
-source spore_analyzer_env/bin/activate
-```
+Install UV
 
-#### Using conda (if you have Anaconda/Miniconda):
-```bash
-# Create virtual environment
-conda create -n spore_analyzer python=3.11
-conda activate spore_analyzer
-```
+#### Install Deps
 
-### 3. Install Dependencies
-
-#### Option A: Using pip (recommended)
-```bash
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-If `requirements.txt` doesn't exist, install directly from `pyproject.toml`:
-```bash
-pip install numpy>=2.3.3 onnxruntime>=1.22.1 opencv-python>=4.11.0.86 opencv-python-headless>=4.11.0.86 openpyxl>=3.1.5 pandas>=2.3.2 pillow>=11.3.0 plotly>=6.3.0 requests>=2.32.5 scikit-image>=0.25.2 scipy>=1.16.1 streamlit-plotly-events>=0.0.6 streamlit>=1.49.1
-```
-
-#### Option B: Using uv (if you have uv installed)
 ```bash
 uv sync
 ```
 
 ### 4. Create Configuration Directory
 
+Note: This should already exist, make any edits needed
 Create the Streamlit configuration directory and file:
 
 ```bash
@@ -87,6 +63,7 @@ mkdir -p .streamlit
 ```
 
 Create `.streamlit/config.toml` with the following content:
+
 ```toml
 [server]
 headless = true
@@ -103,49 +80,42 @@ primaryColor = "#b67feb"
 ### Start the Application
 
 ```bash
-streamlit run app.py --server.port 5000
-```
-
-### Alternative Startup Methods
-
-#### Using Python directly:
-```bash
-python -m streamlit run app.py --server.port 5000
-```
-
-#### With custom port:
-```bash
-streamlit run app.py --server.port 8080
+uv run streamlit run app.py --server.port 5000
 ```
 
 ### Access the Application
 
 Once started, the application will be available at:
+
 - **Local URL**: http://localhost:5000
-- **Network URL**: http://your-ip-address:5000
 
 The terminal will display both URLs when the application starts successfully.
 
 ## 📋 Usage Instructions
 
 ### 1. Image Source (Step 1)
+
 - **Upload Image**: Use the file uploader to select microscopy images (JPG, PNG, TIFF)
 - **iNaturalist Integration**: Enter an observation ID to load images directly from iNaturalist
 - **Image Requirements**: High-contrast, well-focused microscopy images work best
 
 ### 2. Calibration (Step 2)
+
 Choose one of the calibration methods:
 
 #### Manual Entry
+
 - Enter the pixel-to-micrometer conversion ratio manually
 - Useful when you know the exact scale from microscope settings
 
 #### Auto-detect Micrometer Divisions
+
 - Upload an image with visible micrometer scale divisions
 - The system will automatically detect and calibrate the scale
 - Works best with clear, high-contrast scale markings
 
 ### 3. Analysis (Step 3)
+
 - **Configure Detection Parameters**: Adjust area filters, circularity, and shape constraints
 - **Choose Detection Method**: Traditional computer vision or YOLO deep learning (if model available)
 - **Enable Watershed Separation**: Automatically separate touching spores
@@ -156,17 +126,20 @@ Choose one of the calibration methods:
 ## 🔧 Configuration Options
 
 ### Detection Parameters
+
 - **Area Range**: Minimum and maximum spore size (in pixels or micrometers)
 - **Circularity Filter**: Shape constraint (0.0 = any shape, 1.0 = perfect circle)
 - **Aspect Ratio**: Length-to-width ratio limits
 - **Edge Exclusion**: Remove partially visible spores at image borders
 
 ### Watershed Separation
+
 - **Aggressiveness**: Conservative, Balanced, or Aggressive separation
 - **Smoothing**: Gaussian smoothing for improved separation
 - **Erosion Cycles**: Morphological preprocessing for connected regions
 
 ### Export Settings
+
 - **Measurement Units**: Micrometers, millimeters, or pixels
 - **Statistical Format**: Include mycological summary statistics
 - **Image Overlays**: Export annotated images with measurements
@@ -176,6 +149,7 @@ Choose one of the calibration methods:
 ### Common Installation Issues
 
 #### OpenCV Installation Problems:
+
 ```bash
 # If opencv-python fails to install:
 pip install --upgrade pip setuptools wheel
@@ -183,11 +157,13 @@ pip install opencv-python-headless opencv-python
 ```
 
 #### Memory Issues with Large Images:
+
 - Resize images to maximum 2048x2048 pixels before upload
 - Close other applications to free memory
 - Consider using a machine with more RAM
 
 #### Port Already in Use:
+
 ```bash
 # Try a different port:
 streamlit run app.py --server.port 8080
@@ -196,18 +172,21 @@ streamlit run app.py --server.port 8080
 ### Application Issues
 
 #### No Spores Detected:
+
 - Check image contrast and focus quality
 - Adjust area range filters (try wider ranges)
 - Reduce circularity filter threshold
 - Ensure proper calibration
 
 #### Too Many False Detections:
+
 - Increase minimum area threshold
 - Tighten circularity filter (closer to 1.0)
 - Enable edge exclusion
 - Adjust aspect ratio limits
 
 #### Calibration Problems:
+
 - Verify scale bar visibility and contrast
 - Check reference distance accuracy
 - Try manual calibration as fallback
@@ -216,6 +195,7 @@ streamlit run app.py --server.port 8080
 ### Performance Issues
 
 #### Slow Processing:
+
 - Reduce image size before upload
 - Disable watershed separation for faster processing
 - Use traditional CV method instead of YOLO
@@ -239,6 +219,7 @@ fungal-spore-analyzer/
 ## 🔬 Technical Details
 
 ### Core Technologies
+
 - **Streamlit**: Web application framework
 - **OpenCV**: Computer vision and image processing
 - **NumPy & SciPy**: Numerical computing and scientific algorithms
@@ -247,11 +228,13 @@ fungal-spore-analyzer/
 - **scikit-image**: Advanced image processing algorithms
 
 ### Detection Methods
+
 - **Traditional CV**: Edge detection, morphological operations, and contour analysis
 - **YOLO Segmentation**: Deep learning models for enhanced detection (optional)
 - **Watershed Segmentation**: Separation of touching or overlapping spores
 
 ### Measurement Accuracy
+
 - Sub-pixel precision through interpolation and ellipse fitting
 - Automatic calibration validation
 - Statistical confidence intervals for measurements

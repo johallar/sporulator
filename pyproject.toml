@@ -17,4 +17,5 @@ dependencies = [
     "scipy>=1.16.1",
     "streamlit-plotly-events>=0.0.6",
     "streamlit>=1.49.1",
+    "streamlit-image-coordinates>=0.4.0",
 ]

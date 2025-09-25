@@ -6,13 +6,14 @@ import plotly.express as px
 import plotly.graph_objects as go
 from PIL import Image
 import io
-import base64
 import requests
 import re
 # Canvas functionality will be implemented with Plotly
 from spore_analyzer import SporeAnalyzer
-from utils import calculate_statistics, create_overlay_image, export_results, generate_mycological_summary
+from utils import calculate_statistics, create_overlay_image, export_results, generate_dimensions_summary, generate_q_value_summary
 from calibration import StageCalibration
+from streamlit_image_coordinates import streamlit_image_coordinates
+from PIL import Image, ImageDraw
 
 # Configure page
 st.set_page_config(page_title="Sporulator",
@@ -35,6 +36,8 @@ if 'calibration_complete' not in st.session_state:
     st.session_state.calibration_complete = False
 if 'analysis_results' not in st.session_state:
     st.session_state.analysis_results = []
+if 'known_distance' not in st.session_state:
+    st.session_state.known_distance = 100.0
 if 'pixel_scale' not in st.session_state:
     st.session_state.pixel_scale = None  # Requires explicit calibration
 
@@ -48,6 +51,9 @@ if 'step_2_complete' not in st.session_state:
 if 'step_3_complete' not in st.session_state:
     st.session_state.step_3_complete = False
 
+# Calibration
+if 'points' not in st.session_state:
+    st.session_state['points'] = []
 
 def fetch_inaturalist_photos(observation_id):
     """Fetch all photos metadata from iNaturalist observation"""
@@ -211,7 +217,7 @@ def render_navigation_buttons():
 def render_step_1_image_source():
     """Render Step 1: Image Source"""
     st.header("📸 Step 1: Image Source")
-    st.markdown("Choose your microscopy image source and upload or select an image to analyze.")
+    st.markdown("Choose your image source and upload or select an image to analyze.")
     
     # Upload method selection
     upload_method = st.radio(
@@ -382,7 +388,7 @@ def render_step_2_calibration():
     
     # Show image preview if available
     if 'original_image' in st.session_state:
-        with st.expander("📷 Image Preview", expanded=True):
+        with st.expander("📷 Image Preview", expanded=False):
             col1, col2 = st.columns([2, 1])
             with col1:
                 st.image(st.session_state.display_image, caption="Image to Calibrate", use_container_width=True)
@@ -391,20 +397,21 @@ def render_step_2_calibration():
                 st.info(f"**Dimensions:** {image_array.shape[1]} × {image_array.shape[0]} pixels")
 
     # Calibration method selection
+    st.markdown("### ⚙️ Calibration Method")
     calibration_method = st.selectbox(
         "Calibration Method", [
-            "Manual Entry", "Auto-Detect Micrometer Divisions", "Manual Measurement"
+            "Manual Entry", "Manual Measurement" #, "Auto-Detect Micrometer Divisions"
         ],
         help="Choose how to determine the pixel scale")
 
     if calibration_method == "Manual Entry":
         st.markdown("### 📝 Manual Entry")
-        st.info("Enter the known pixel scale for your microscopy setup.")
+        st.text("Enter the known pixel scale for your microscopy setup.")
         
         current_value = st.session_state.get('pixel_scale', 10.0)
         if current_value is None:
             current_value = 10.0
-            
+
         pixel_scale = st.number_input(
             "Pixel Scale (pixels/μm)",
             min_value=0.1,
@@ -425,343 +432,103 @@ def render_step_2_calibration():
                 st.session_state.pixel_scale = 10.0
                 st.rerun()
 
-    elif calibration_method == "Auto-Detect Micrometer Divisions":
-        st.markdown("### 🔍 Auto-Detect Micrometer Divisions")
-        st.info("📏 This method detects tick marks on graduated rulers/micrometers in your uploaded image.")
-        
-        # Division spacing input
-        division_spacing_um = st.number_input(
-            "Distance per division (μm)",
-            min_value=0.1,
-            max_value=100.0,
-            value=10.0,  # Default: 0.01mm = 10μm
-            step=0.1,
-            help="Distance between consecutive tick marks (0.01mm = 10μm)")
-        
-        pixel_scale = st.session_state.get('pixel_scale', 10.0)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.info(f"Current pixel scale: {pixel_scale:.2f} pixels/μm")
-            
-        with col2:
-            if st.button("🔍 Auto-Detect Divisions", key="auto_detect_divisions"):
-                if 'original_image' in st.session_state:
-                    with st.spinner("Detecting micrometer divisions in image..."):
-                        calibration_result = st.session_state.calibration.auto_detect_scale(
-                            st.session_state.original_image, "micrometer_divisions",
-                            division_spacing_um)
-
-                        if calibration_result['pixel_scale']:
-                            # Validate calibration results
-                            validation = st.session_state.calibration.validate_calibration(
-                                calibration_result['pixel_scale'], "microscopy")
-
-                            st.session_state.pixel_scale = calibration_result['pixel_scale']
-                            st.session_state.calibration_complete = True
-
-                            if validation['is_valid']:
-                                st.success(f"✅ Micrometer calibration successful! Pixel scale: {calibration_result['pixel_scale']:.2f} pixels/μm")
-                            else:
-                                st.warning(f"⚠️ Calibration completed with warning: {validation['warning']}")
-                                st.info(f"Pixel scale: {calibration_result['pixel_scale']:.2f} pixels/μm")
-
-                            # Show visualization
-                            if calibration_result['visualization'] is not None:
-                                st.subheader("🔍 Detected Micrometer Divisions")
-                                st.image(calibration_result['visualization'], 
-                                         caption="Detected Micrometer Divisions", 
-                                         use_container_width=True)
-                        else:
-                            st.error("❌ Could not detect micrometer divisions. Try manual measurement instead.")
-                else:
-                    st.error("❌ No image available for calibration.")
-
     elif calibration_method == "Manual Measurement":
         st.markdown("### 📐 Manual Measurement")
-        st.info("🖱️ **Instructions:** Use the drawing tool below to drag a line across a known distance on your image.")
+        st.info("🖱️ **Instructions:** Click once to set measurement start, click again to set measurement end. Then enter the number of um between the two points to calibrate")
         
         if 'original_image' in st.session_state:
-            # Initialize session state for manual measurement
-            if 'manual_line_drawn' not in st.session_state:
-                st.session_state.manual_line_drawn = False
-            if 'manual_line_coords' not in st.session_state:
-                st.session_state.manual_line_coords = None
             
             # Create drawable canvas for line drawing
-            display_image = np.array(st.session_state.display_image.copy())
-            
-            # Create the canvas
-            # Create interactive Plotly figure for line drawing
-            import plotly.graph_objects as go
-            
-            # Setup figure with image background
-            fig = go.Figure()
-            
-            # Convert PIL image to base64 for Plotly
-            import io
-            import base64
-            img_buffer = io.BytesIO()
-            st.session_state.display_image.save(img_buffer, format='PNG')
-            img_base64 = base64.b64encode(img_buffer.getvalue()).decode()
-            
-            # Add background image
-            fig.add_layout_image(
-                dict(
-                    source=f"data:image/png;base64,{img_base64}",
-                    xref="x",
-                    yref="y",
-                    x=0,
-                    y=0,
-                    sizex=display_image.shape[1],
-                    sizey=display_image.shape[0],
-                    sizing="stretch",
-                    opacity=1,
-                    layer="below"
+            display_image_arr = np.array(st.session_state.display_image)
+            display_image = Image.fromarray(display_image_arr)
+
+            def add_point():
+                if len(st.session_state["points"]) >= 2:
+                    st.session_state["points"] = []
+                raw_value = st.session_state["pil"]
+                # Image is scaled to fit width, so convert back to original coords
+                w_ratio = raw_value["x"] / raw_value["width"]
+                h_ratio = raw_value["y"] / raw_value["height"]
+                value = (w_ratio * display_image_arr.shape[1]), (h_ratio * display_image_arr.shape[0])
+                st.session_state["points"].append(value)
+
+            def get_ellipse_coords(point: tuple[int, int], radius: float = 10) -> tuple[int, int, int, int]:
+                center = point
+                return (
+                    center[0] - radius,
+                    center[1] - radius,
+                    center[0] + radius,
+                    center[1] + radius,
                 )
-            )
+
+
+            draw = ImageDraw.Draw(display_image)
+
+            # Draw an ellipse at each coordinate in points
+            points = st.session_state["points"]
+            radius = display_image_arr.shape[0] // 200  # 1% of image height
+            if len(points) > 1:
+                [start_point, end_point] = points
+                draw.line([start_point, end_point], fill="blue", width=round(radius/2))
+
+            for i, point in enumerate(points):
+                coords = get_ellipse_coords(point, radius)
+                draw.ellipse(coords, fill="green" if i == 0 else "red")
             
-            # Add existing line if it exists
-            if st.session_state.manual_line_coords:
-                x1, y1, x2, y2 = st.session_state.manual_line_coords
-                fig.add_trace(go.Scatter(
-                    x=[x1, x2],
-                    y=[y1, y2],
-                    mode='lines+markers',
-                    line=dict(color='lime', width=4),
-                    marker=dict(size=10, color='lime'),
-                    name='Measurement Line',
-                    showlegend=False
-                ))
-            
-            # Configure layout for drawing
-            fig.update_layout(
-                title="🖱️ Use the drawing tools above to draw a measurement line",
-                xaxis=dict(
-                    range=[0, display_image.shape[1]],
-                    title="X coordinate (pixels)",
-                    showgrid=True,
-                    gridcolor='rgba(255,255,255,0.3)'
-                ),
-                yaxis=dict(
-                    range=[display_image.shape[0], 0],  # Flip Y axis for image coordinates
-                    title="Y coordinate (pixels)",
-                    showgrid=True,
-                    gridcolor='rgba(255,255,255,0.3)',
-                    scaleanchor="x",
-                    scaleratio=1
-                ),
-                width=min(700, display_image.shape[1]),
-                height=min(600, display_image.shape[0]),
-                showlegend=False,
-                margin=dict(l=50, r=50, t=50, b=50),
-                # Enable drawing mode
-                dragmode="drawline",
-                newshape=dict(
-                    line=dict(color="lime", width=4),
-                    opacity=0.8
-                )
-            )
-            
-            # Configuration for drawing tools
-            config = {
-                'modeBarButtonsToAdd': [
-                    'drawline',
-                    'eraseshape'
-                ],
-                'modeBarButtonsToRemove': ['pan2d', 'lasso2d'],
-                'displaylogo': False,
-                'displayModeBar': True
-            }
-            
-            # Add any existing line to the figure if available
-            if st.session_state.manual_line_coords:
-                x1, y1, x2, y2 = st.session_state.manual_line_coords
-                fig.add_shape(
-                    type="line",
-                    x0=x1, y0=y1, x1=x2, y1=y2,
-                    line=dict(color="lime", width=4),
-                    opacity=0.8
-                )
-            
-            # Display the interactive plot with drawing tools
-            chart = st.plotly_chart(fig, use_container_width=False, config=config, key="measurement_plot")
+
+            streamlit_image_coordinates(display_image, key="pil", on_click=add_point, cursor="crosshair", use_column_width=True)
             
             # Instructions and capture button
-            col1, col2 = st.columns([2, 1])
-            
-            with col1:
-                st.info("📌 **Draw a measurement line using the drawing tools above, then click 'Capture Line' below**")
-            
-            with col2:
-                # Capture drawn line button
-                if st.button("📏 Capture Drawn Line", type="primary", key="capture_line_btn"):
-                    st.session_state.show_coord_input = True
+            col_info, _ = st.columns([3, 3])
+            with col_info:
+                if st.button("🔄 Clear Line", key="clear_canvas_line"):
+                    st.session_state.points = []
                     st.rerun()
+            with col_info: 
+                # Distance input
+                unit_symbol = "μm"
+                max_val = 10000.0
+                step_val = 0.1
+                known_distance_val = st.session_state["known_distance"]
+                known_distance = st.number_input(
+                    f"Known distance ({unit_symbol}):",
+                    min_value=0.001,
+                    max_value=max_val,
+                    value=known_distance_val,
+                    step=step_val,
+                    help=f"The actual distance of your drawn line in {unit_symbol}"
+                )
+                # ORRRR Provide this
+                # 2.5424
+                # How many um per ocular unit
+                # um_per_ou = st.number_input(
+                #     "μm per ocular unit",
+                #     min_value=0.1,
+                #     max_value=100.0,
+                #     value=current_value,
+                #     step=0.1,
+                #     help="Number of pixels per micrometer. This converts pixel measurements to micrometers."
+                # )
+                # # How many um per ocular unit
+                # num_ou = st.number_input(
+                #     "number ocular units",
+                #     min_value=1,
+                #     max_value=100,
+                #     value=current_value,
+                #     step=1,
+                #     help="Number of ocular units selected"
+                # )
                 
-                # Clear any existing line
-                if st.button("🗑️ Clear Line", key="clear_drawn_line"):
-                    st.session_state.manual_line_coords = None
-                    st.rerun()
-            
-            # Simple coordinate input for drawn line
-            if st.session_state.get('show_coord_input', False):
-                st.markdown("**📍 Enter the coordinates of your drawn line:**")
-                col1, col2, col3 = st.columns([1, 1, 1])
-                
-                with col1:
-                    x1 = st.number_input("Start X", min_value=0, max_value=display_image.shape[1], value=100, key="coord_x1")
-                    y1 = st.number_input("Start Y", min_value=0, max_value=display_image.shape[0], value=100, key="coord_y1")
-                
-                with col2:
-                    x2 = st.number_input("End X", min_value=0, max_value=display_image.shape[1], value=300, key="coord_x2")
-                    y2 = st.number_input("End Y", min_value=0, max_value=display_image.shape[0], value=200, key="coord_y2")
-                
-                with col3:
-                    st.write("") # spacing
-                    if st.button("✅ Set Coordinates", key="set_coords"):
-                        st.session_state.manual_line_coords = (int(x1), int(y1), int(x2), int(y2))
-                        st.session_state.show_coord_input = False
-                        st.rerun()
-            
-            # Show current line status
-            if st.session_state.manual_line_coords:
-                x1, y1, x2, y2 = st.session_state.manual_line_coords
-                pixel_distance = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
-                st.success(f"✅ **Line set:** ({x1}, {y1}) to ({x2}, {y2}) - Length: {pixel_distance:.1f} pixels")
-            
-            # Initialize click points if not exist
-            if 'manual_click_points' not in st.session_state:
-                st.session_state.manual_click_points = []
-            
-            # Manual coordinate input section (since Plotly click capture in Streamlit is limited)
-            with st.expander("✏️ Manual Coordinate Entry", expanded=not st.session_state.manual_line_coords):
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.markdown("**📍 Start Point:**")
-                    x1_input = st.number_input("X1 (pixels)", min_value=0, max_value=display_image.shape[1], value=100, key="manual_x1_new")
-                    y1_input = st.number_input("Y1 (pixels)", min_value=0, max_value=display_image.shape[0], value=100, key="manual_y1_new")
-                
-                with col2:
-                    st.markdown("**📍 End Point:**")
-                    x2_input = st.number_input("X2 (pixels)", min_value=0, max_value=display_image.shape[1], value=300, key="manual_x2_new")
-                    y2_input = st.number_input("Y2 (pixels)", min_value=0, max_value=display_image.shape[0], value=200, key="manual_y2_new")
-                
-                col_draw, col_clear = st.columns(2)
-                with col_draw:
-                    if st.button("📏 Draw Line", type="primary", key="draw_line_btn"):
-                        st.session_state.manual_line_coords = (int(x1_input), int(y1_input), int(x2_input), int(y2_input))
-                        st.rerun()
-                
-                with col_clear:
-                    if st.button("🗑️ Clear Line", key="clear_line_btn"):
-                        st.session_state.manual_line_coords = None
-                        st.rerun()
-            
-            # Canvas drawing instructions
-            st.info("🖱️ **Instructions:** Use the line tool from the canvas toolbar above to click and drag a measurement line across a known distance on your image.")
-            
+
             # Show current line info if available
-            if st.session_state.manual_line_coords:
-                x1, y1, x2, y2 = st.session_state.manual_line_coords
+            if len(st.session_state.points) == 2:
+                [[x1, y1], [x2, y2]] = st.session_state.points
                 pixel_distance = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
-                col_info, col_clear = st.columns([3, 1])
+                st.session_state.pixel_scale = pixel_distance / known_distance
                 with col_info:
-                    st.success(f"📏 Line drawn: {pixel_distance:.1f} pixels from ({x1}, {y1}) to ({x2}, {y2})")
-                with col_clear:
-                    if st.button("🔄 Clear Line", key="clear_canvas_line"):
-                        st.session_state.manual_line_coords = None
-                        st.session_state.manual_line_drawn = False
-                        st.rerun()
-            
-                
-            
-            # Measurement input section (show if line is drawn)
-            if st.session_state.manual_line_coords:
-                st.markdown("---")
-                st.markdown("### 📏 Set Known Distance")
-                
-                x1, y1, x2, y2 = st.session_state.manual_line_coords
-                pixel_distance = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
-                
-                st.info(f"**Line drawn:** {pixel_distance:.1f} pixels long")
-                
-                col1, col2 = st.columns([2, 1])
-                
-                with col1:
-                    # Initialize measurement values
-                    if 'manual_known_distance' not in st.session_state:
-                        st.session_state.manual_known_distance = 50.0
-                    if 'manual_measurement_unit' not in st.session_state:
-                        st.session_state.manual_measurement_unit = "micrometers"
-                    
-                    # Unit selection
-                    unit = st.selectbox(
-                        "Measurement unit:",
-                        ["micrometers (μm)", "millimeters (mm)"],
-                        index=0 if st.session_state.manual_measurement_unit == "micrometers" else 1,
-                        key="manual_unit_select"
-                    )
-                    st.session_state.manual_measurement_unit = "micrometers" if "micrometers" in unit else "millimeters"
-                    
-                    # Distance input
-                    unit_symbol = "μm" if st.session_state.manual_measurement_unit == "micrometers" else "mm"
-                    max_val = 10000.0 if st.session_state.manual_measurement_unit == "micrometers" else 100.0
-                    step_val = 0.1 if st.session_state.manual_measurement_unit == "micrometers" else 0.01
-                    
-                    known_distance = st.number_input(
-                        f"Known distance ({unit_symbol}):",
-                        min_value=0.001,
-                        max_value=max_val,
-                        value=st.session_state.manual_known_distance,
-                        step=step_val,
-                        help=f"The actual distance of your drawn line in {st.session_state.manual_measurement_unit}"
-                    )
-                    st.session_state.manual_known_distance = known_distance
-                
-                with col2:
-                    st.markdown("**Line Info:**")
-                    st.write(f"Start: ({x1}, {y1})")
-                    st.write(f"End: ({x2}, {y2})")
-                    st.write(f"Length: {pixel_distance:.1f}px")
-                
-                # Apply calibration button
-                if st.button("🎯 Apply Calibration", type="primary", key="apply_manual_calibration"):
-                    if pixel_distance > 0 and known_distance > 0:
-                        # Convert to micrometers if needed
-                        distance_um = known_distance if st.session_state.manual_measurement_unit == "micrometers" else known_distance * 1000
-                        
-                        # Use calibration.py manual_calibration method
-                        point1 = (x1, y1)
-                        point2 = (x2, y2)
-                        calibration_result = st.session_state.calibration.manual_calibration(
-                            st.session_state.original_image, point1, point2, distance_um
-                        )
-                        
-                        if calibration_result:
-                            st.session_state.pixel_scale = calibration_result['pixel_scale']
-                            st.session_state.calibration_complete = True
-                            st.session_state.manual_calibration_complete = True
-                            st.session_state.manual_calibration_visualization = calibration_result['visualization']
-                            
-                            unit_display = f"{known_distance} {unit_symbol}"
-                            st.success(f"✅ Manual calibration successful!")
-                            st.success(f"📏 {unit_display} = {pixel_distance:.1f} pixels")
-                            st.success(f"🔬 Pixel scale: {calibration_result['pixel_scale']:.2f} μm/pixel")
-                            st.rerun()
-                        else:
-                            st.error("❌ Calibration failed. Please try again.")
-                    else:
-                        st.error("❌ Invalid measurements. Please ensure both distance values are positive.")
-                        
-            # Display calibration results if available
-            if st.session_state.get('manual_calibration_complete', False) and 'manual_calibration_visualization' in st.session_state:
-                st.markdown("---")
-                st.markdown("### ✅ Calibration Results")
-                st.image(st.session_state.manual_calibration_visualization, 
-                        caption=f"Manual measurement calibration - Scale: {st.session_state.pixel_scale:.2f} μm/pixel", 
-                        use_container_width=True)
+                    st.success(f"📏 Line drawn: {pixel_distance:.2f} pixels from ({x1:.2f}, {y1:.2f}) to ({x2:.2f}, {y2:.2f})")
+                    st.success(f"✏️ Known distance: {known_distance:.2f} {unit_symbol}, Pixel scale: {st.session_state.pixel_scale:.2f} pixels/{unit_symbol}")
+
         else:
             st.warning("⚠️ No image available for measurement. Please complete Step 1 first.")
     
@@ -780,14 +547,14 @@ def render_step_3_analysis():
     # Show image and calibration info
     if 'original_image' in st.session_state:
         with st.expander("📷 Image & Calibration Summary", expanded=False):
-            col1, col2 = st.columns([2, 1])
+            col1, col2 = st.columns([1, 1])
             with col1:
-                st.image(st.session_state.display_image, caption="Image for Analysis", use_container_width=True)
-            with col2:
                 image_array = st.session_state.original_image
-                pixel_scale = st.session_state.get('pixel_scale', 10.0)
                 st.info(f"**Dimensions:** {image_array.shape[1]} × {image_array.shape[0]} pixels")
+            with col2:
+                pixel_scale = st.session_state.get('pixel_scale', 10.0)
                 st.info(f"**Pixel Scale:** {pixel_scale:.2f} pixels/μm")
+            st.image(st.session_state.display_image, caption="Image for Analysis", use_container_width=True)
     
     # Analysis Parameters in organized sections
     st.markdown("## 📊 Analysis Parameters")
@@ -797,7 +564,7 @@ def render_step_3_analysis():
         area_range = st.slider(
             "Spore Area Range (μm²)",
             min_value=1,
-            max_value=1000,
+            max_value=10000,
             value=(10, 500),
             help="Area range for objects to be considered spores")
         min_area, max_area = area_range
@@ -941,7 +708,7 @@ def render_step_3_analysis():
         # Font Settings
         label_fontsize = st.slider("Label Font Size", min_value=0.5, max_value=3.0, value=1.6, step=0.1,
                                  help="Size of spore ID numbers")
-        measurement_fontsize = st.slider("Measurement Font Size", min_value=0.5, max_value=3.0, value=1.2, step=0.1,
+        measurement_fontsize = st.slider("Measurement Font Size", min_value=0.5, max_value=3.0, value=1.6, step=0.1,
                                         help="Size of measurement text")
 
         # Colors and Style
@@ -954,9 +721,6 @@ def render_step_3_analysis():
         with col4:
             border_width = st.slider("Text Background Size", min_value=0, max_value=10, value=8, help="Width of text background borders (0 = no background)")
             line_width = st.slider("Line Width", min_value=1, max_value=10, value=2, help="Width of measurement lines")
-
-    # Analysis Control Section
-    st.markdown("## ▶️ Run Analysis")
     
     analysis_col1, analysis_col2 = st.columns([1, 1])
     
@@ -1056,24 +820,14 @@ def render_step_3_analysis():
         # Get results from session state
         results = st.session_state.get('analysis_results', [])
         overlay_image = st.session_state.get('overlay_image', None)
-        
+
         if results and len(results) > 0:
-            # Display summary metrics
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Total Spores", len(results))
-            with col2:
-                avg_length = np.mean([spore['length_um'] for spore in results])
-                st.metric("Avg Length", f"{avg_length:.1f} μm")
-            with col3:
-                avg_width = np.mean([spore['width_um'] for spore in results])
-                st.metric("Avg Width", f"{avg_width:.1f} μm")
-            with col4:
-                avg_area = np.mean([spore['area_um2'] for spore in results])
-                st.metric("Avg Area", f"{avg_area:.1f} μm²")
-            
             # Display overlay image
-            st.markdown("### 🔬 Detected Spores Visualization")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.info(f"**Dimensions:** {image_array.shape[1]} × {image_array.shape[0]} pixels")
+            with col2:
+                st.info(f"**Pixel Scale:** {pixel_scale:.2f} pixels/μm")
             if overlay_image is not None:
                 col1, col2 = st.columns([3, 1])
                 with col1:
@@ -1081,25 +835,6 @@ def render_step_3_analysis():
                     st.image(overlay_image, caption=f"Showing {selected_count} of {len(results)} detected spores", 
                             use_container_width=True)
                 with col2:
-                    st.markdown("**Legend:**")
-                    st.markdown("*Select spores to display:*")
-                    
-                    # Initialize selected spores if not exists
-                    if 'selected_spores' not in st.session_state:
-                        st.session_state.selected_spores = set(range(len(results)))
-                    
-                    # Spore selection checkboxes
-                    for i in range(len(results)):
-                        spore = results[i]
-                        is_selected = i in st.session_state.selected_spores
-                        checkbox_label = f"Spore {i+1} ({spore['length_um']:.1f}×{spore['width_um']:.1f} μm)"
-                        
-                        if st.checkbox(checkbox_label, value=is_selected, key=f"spore_checkbox_{i}"):
-                            st.session_state.selected_spores.add(i)
-                        else:
-                            st.session_state.selected_spores.discard(i)
-                    
-                    st.markdown("---")
                     st.markdown("**Controls:**")
                     
                     # Select/Deselect all buttons
@@ -1145,69 +880,44 @@ def render_step_3_analysis():
                         )
                         st.session_state.overlay_image = new_overlay
                         st.rerun()
-            
-            # Results table and statistics
-            st.markdown("### 📊 Measurement Data & Statistics")
-            
-            # Create dataframe for display
-            df_data = []
-            for i, spore in enumerate(results):
-                df_data.append({
-                    'ID': i + 1,
-                    'Length (μm)': round(spore['length_um'], 2),
-                    'Width (μm)': round(spore['width_um'], 2),
-                    'Area (μm²)': round(spore['area_um2'], 2),
-                    'Aspect Ratio': round(spore['aspect_ratio'], 2),
-                    'Circularity': round(spore['circularity'], 3),
-                    'Solidity': round(spore['solidity'], 3),
-                    'Convexity': round(spore['convexity'], 3),
-                    'Extent': round(spore['extent'], 3)
-                })
-            
-            df = pd.DataFrame(df_data)
-            
-            # Display table with selection capability
-            st.markdown("**Individual Spore Measurements:**")
-            st.dataframe(df, use_container_width=True, height=300)
-            
-            # Calculate and display statistics
-            stats = calculate_statistics(results)
-            if stats:
-                st.markdown("**Summary Statistics:**")
-                
-                stats_col1, stats_col2 = st.columns(2)
-                with stats_col1:
-                    st.markdown("**Length (μm):**")
-                    st.markdown(f"- Mean: {stats['length_mean']:.2f} ± {stats['length_std']:.2f}")
-                    st.markdown(f"- Range: {stats['length_min']:.2f} - {stats['length_max']:.2f}")
-                    st.markdown(f"- Median: {stats['length_median']:.2f}")
+                    st.markdown("---")
+                    st.markdown("*Select spores to display:*")
                     
-                    st.markdown("**Area (μm²):**")
-                    st.markdown(f"- Mean: {stats['area_mean']:.2f} ± {stats['area_std']:.2f}")
-                    st.markdown(f"- Range: {stats['area_min']:.2f} - {stats['area_max']:.2f}")
-                    st.markdown(f"- Median: {stats['area_median']:.2f}")
-                
-                with stats_col2:
-                    st.markdown("**Width (μm):**")
-                    st.markdown(f"- Mean: {stats['width_mean']:.2f} ± {stats['width_std']:.2f}")
-                    st.markdown(f"- Range: {stats['width_min']:.2f} - {stats['width_max']:.2f}")
-                    st.markdown(f"- Median: {stats['width_median']:.2f}")
+                    # Initialize selected spores if not exists
+                    if 'selected_spores' not in st.session_state:
+                        st.session_state.selected_spores = set(range(len(results)))
                     
-                    st.markdown("**Aspect Ratio:**")
-                    st.markdown(f"- Mean: {stats['aspect_ratio_mean']:.2f} ± {stats['aspect_ratio_std']:.2f}")
-                    st.markdown(f"- Range: {stats['aspect_ratio_min']:.2f} - {stats['aspect_ratio_max']:.2f}")
+                    # Spore selection checkboxes
+                    with st.container(height=400):
+                        for i in range(len(results)):
+                            spore = results[i]
+                            is_selected = i in st.session_state.selected_spores
+                            checkbox_label = f"Spore {i+1} ({spore['length_um']:.1f}×{spore['width_um']:.1f} μm)"
+                            
+                            if st.checkbox(checkbox_label, value=is_selected, key=f"spore_checkbox_{i}"):
+                                st.session_state.selected_spores.add(i)
+                            else:
+                                st.session_state.selected_spores.discard(i)
             
-            # Generate mycological summary
-            st.markdown("### 📋 Mycological Summary")
-            with st.expander("📝 Standard Format Summary", expanded=False):
-                mycological_summary = generate_mycological_summary(results)
-                st.markdown(mycological_summary)
-                
-                # Copy to clipboard button
-                if st.button("📋 Copy Summary to Clipboard", key="copy_summary"):
-                    st.code(mycological_summary, language=None)
-                    st.success("Summary displayed above - you can copy it manually.")
-            
+                # Display summary metrics
+                st.info(generate_dimensions_summary(results))
+                st.info(
+                    generate_q_value_summary(results)
+                )
+
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Total Spores", len(results))
+                with col2:
+                    avg_length = np.mean([spore['length_um'] for spore in results])
+                    st.metric("Avg Length", f"{avg_length:.1f} μm")
+                with col3:
+                    avg_width = np.mean([spore['width_um'] for spore in results])
+                    st.metric("Avg Width", f"{avg_width:.1f} μm")
+                with col4:
+                    avg_area = np.mean([spore['area_um2'] for spore in results])
+                    st.metric("Avg Area", f"{avg_area:.1f} μm²")
+        
             # Export functionality
             st.markdown("### 📥 Export Results")
             export_col1, export_col2, export_col3 = st.columns(3)
@@ -1288,6 +998,54 @@ def render_step_3_analysis():
                             st.error(f"Failed to save overlay image: {str(e)}")
                     else:
                         st.error("No overlay image available")
+            # Create dataframe for display
+            df_data = []
+            for i, spore in enumerate(results):
+                df_data.append({
+                    'ID': i + 1,
+                    'Length (μm)': round(spore['length_um'], 2),
+                    'Width (μm)': round(spore['width_um'], 2),
+                    'Area (μm²)': round(spore['area_um2'], 2),
+                    'Aspect Ratio': round(spore['aspect_ratio'], 2),
+                    'Circularity': round(spore['circularity'], 3),
+                    'Solidity': round(spore['solidity'], 3),
+                    'Convexity': round(spore['convexity'], 3),
+                    'Extent': round(spore['extent'], 3)
+                })
+            
+            df = pd.DataFrame(df_data)
+            
+            # Display table with selection capability
+            st.markdown("**Individual Spore Measurements:**")
+            st.dataframe(df, use_container_width=True, height=300)
+            
+            # # Calculate and display statistics
+            # stats = calculate_statistics(results)
+            # if stats:
+            #     st.markdown("**Summary Statistics:**")
+                
+            #     stats_col1, stats_col2 = st.columns(2)
+            #     with stats_col1:
+            #         st.markdown("**Length (μm):**")
+            #         st.markdown(f"- Mean: {stats['length_mean']:.2f} ± {stats['length_std']:.2f}")
+            #         st.markdown(f"- Range: {stats['length_min']:.2f} - {stats['length_max']:.2f}")
+            #         st.markdown(f"- Median: {stats['length_median']:.2f}")
+                    
+            #         st.markdown("**Area (μm²):**")
+            #         st.markdown(f"- Mean: {stats['area_mean']:.2f} ± {stats['area_std']:.2f}")
+            #         st.markdown(f"- Range: {stats['area_min']:.2f} - {stats['area_max']:.2f}")
+            #         st.markdown(f"- Median: {stats['area_median']:.2f}")
+                
+            #     with stats_col2:
+            #         st.markdown("**Width (μm):**")
+            #         st.markdown(f"- Mean: {stats['width_mean']:.2f} ± {stats['width_std']:.2f}")
+            #         st.markdown(f"- Range: {stats['width_min']:.2f} - {stats['width_max']:.2f}")
+            #         st.markdown(f"- Median: {stats['width_median']:.2f}")
+                    
+            #         st.markdown("**Aspect Ratio:**")
+            #         st.markdown(f"- Mean: {stats['aspect_ratio_mean']:.2f} ± {stats['aspect_ratio_std']:.2f}")
+            #         st.markdown(f"- Range: {stats['aspect_ratio_min']:.2f} - {stats['aspect_ratio_max']:.2f}")
+            
             
             # Mark step 3 as complete
             st.session_state.step_3_complete = True
@@ -1302,14 +1060,17 @@ def render_step_3_analysis():
 def main():
     """Main application function with wizard-based workflow"""
     # App title and description
-    st.title("🔬 Sporulator")
-    st.markdown("**A 3-step wizard for automated fungal spore detection and measurement**")
+    # st.title("🔬 Sporulator")
+    # st.markdown("**A 3-step wizard for automated fungal spore detection and measurement**")
     
     # Render step indicator
-    render_step_indicator()
+    # render_step_indicator()
     
     # Sidebar with current step info and quick actions
     with st.sidebar:
+        st.title("🔬 Sporulator")
+        st.markdown("**A 3-step wizard for automated fungal spore detection and measurement**")
+
         st.header(f"📍 Current Step: {st.session_state.current_step}/3")
         
         # Step progress indicators
