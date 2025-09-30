@@ -44,6 +44,7 @@ class Detector(ABC):
 
 class SporeAnalyzer:
     def __init__(self):
+        # Basic measurement parameters
         self.pixel_scale = 1.0  # pixels per micrometer
         self.min_area = 10  # minimum area in um^2
         self.max_area = 500  # maximum area in um^2
@@ -52,25 +53,37 @@ class SporeAnalyzer:
         self.solidity_range = (0.5, 1.0)  # min, max solidity (contour area / convex hull area)
         self.convexity_range = (0.7, 1.0)  # min, max convexity (convex hull perimeter / contour perimeter)
         self.extent_range = (0.3, 1.0)  # min, max extent (contour area / bounding rect area)
+
+        # Preprocessing / detection options
         self.exclude_edges = True
-        self.blur_kernel = 5
-        self.threshold_method = "Otsu"
+        self.blur_kernel = 3
+        self.threshold_method = "Adaptive"
         self.threshold_value = None
+
+        # Touching/separation controls
         self.exclude_touching = True  # exclude touching/merged spores
         self.touching_aggressiveness = "Balanced"  # Conservative, Balanced, or Aggressive
         self.separate_touching = False  # separate touching spores using watershed
         self.separation_min_distance = 5  # minimum distance between peaks in watershed
         self.separation_sigma = 1.0  # gaussian sigma for peak detection
         self.separation_erosion_iterations = 1  # erosion iterations before distance transform
+
+        # Parameters controlling outline filling for adaptive threshold outputs
+        # Larger kernel/iterations close bigger gaps in outlines before filling
+        self.outline_close_kernel = 10
+        self.outline_close_iterations = 2
+        self.outline_dilate_iters = 2
     
     def set_parameters(self, pixel_scale=1.0, min_area=10, max_area=500, 
                       circularity_range=(0.3, 0.9), aspect_ratio_range=(1.0, 5.0),
                       solidity_range=(0.5, 1.0), convexity_range=(0.7, 1.0), 
                       extent_range=(0.3, 1.0), exclude_edges=True,
-                      blur_kernel=5, threshold_method="Otsu", threshold_value=None,
+                      blur_kernel=3, threshold_method="Adaptive", threshold_value=None,
                       exclude_touching=True, touching_aggressiveness="Balanced",
                       separate_touching=False, separation_min_distance=5, 
-                      separation_sigma=1.0, separation_erosion_iterations=1):
+                      separation_sigma=1.0, separation_erosion_iterations=1,
+                      outline_close_kernel=10, outline_close_iterations=2,
+                      outline_dilate_iters=2):
         """Set analysis parameters"""
         self.pixel_scale = pixel_scale
         self.min_area = min_area
@@ -90,12 +103,19 @@ class SporeAnalyzer:
         self.separation_min_distance = separation_min_distance
         self.separation_sigma = separation_sigma
         self.separation_erosion_iterations = separation_erosion_iterations
+
+        self.outline_close_kernel = outline_close_kernel
+        self.outline_close_iterations = outline_close_iterations
+        self.outline_dilate_iters = outline_dilate_iters
     
     def preprocess_image(self, image):
         """Preprocess image for spore detection"""
         # Convert to grayscale if needed
+        print(image is None)
+        contrasty = cv2.convertScaleAbs(image, alpha=1.5, beta=0.0)
+        print(contrasty is None)
         if len(image.shape) == 3:
-            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         else:
             gray = image.copy()
         
@@ -120,6 +140,22 @@ class SporeAnalyzer:
         if np.sum(binary == 255) > np.sum(binary == 0):
             binary = cv2.bitwise_not(binary)
         
+        # Fill outlines so contours become solid blobs suitable for ellipse fitting
+        # Convert configured min area (um^2) to pixels for min-area filtering if pixel_scale is set
+        try:
+            min_area_pixels = int(self.min_area * (self.pixel_scale ** 2))
+        except Exception:
+            min_area_pixels = 20
+
+        min_area_pixels = 20
+        binary = self._fill_outlines(
+            binary,
+            close_kernel=self.outline_close_kernel,
+            close_iterations=self.outline_close_iterations,
+            dilate_iters=self.outline_dilate_iters,
+            min_area_pixels=min_area_pixels,
+        )
+
         return gray, binary
     
     def find_contours(self, binary_image):
@@ -407,6 +443,60 @@ class SporeAnalyzer:
             if x <= 1 or y <= 1 or x >= w-2 or y >= h-2:
                 return True
         return False
+
+    def _fill_outlines(self, binary, close_kernel=5, close_iterations=1, dilate_iters=1, min_area_pixels=20):
+        """
+        Convert thin adaptive-threshold outlines into filled blobs.
+
+        Steps:
+        - Ensure binary is 0/255 uint8
+        - Morphological closing to close thin gaps
+        - Small dilation to guarantee outlines are closed
+        - Find contours and draw filled polygons for contours above min_area
+        - Final small closing to smooth shapes
+        """
+        try:
+            # Normalize to 0/255 uint8
+            b = (binary > 0).astype(np.uint8) * 255
+
+            # Morphological closing to close gaps in outlines; allow multiple iterations
+            k = int(close_kernel) if isinstance(close_kernel, int) else 5
+            if k % 2 == 0:
+                k += 1
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+            closed = cv2.morphologyEx(b, cv2.MORPH_CLOSE, kernel, iterations=max(1, int(close_iterations)))
+
+            # Small dilation to ensure outlines are fully connected
+            if dilate_iters and dilate_iters > 0:
+                dkernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+                closed = cv2.dilate(closed, dkernel, iterations=dilate_iters)
+
+            # Find external contours and draw filled shapes filtering small areas
+            contours, _ = cv2.findContours(closed.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            filled = np.zeros_like(closed)
+            for cnt in contours:
+                if cv2.contourArea(cnt) >= max(1, int(min_area_pixels)):
+                    cv2.drawContours(filled, [cnt], -1, 255, thickness=cv2.FILLED)
+
+            # Fill small holes inside filled blobs using floodFill on inverse background
+            # Invert filled to get background, floodFill from borders, then invert to get holes filled
+            inv = cv2.bitwise_not(filled)
+            h, w = inv.shape[:2]
+            mask = np.zeros((h + 2, w + 2), np.uint8)
+            # Flood fill background from (0,0)
+            cv2.floodFill(inv, mask, (0, 0), 255)
+            # Invert floodfilled image to get holes
+            holes = cv2.bitwise_not(inv)
+            # Combine holes with filled
+            filled = cv2.bitwise_or(filled, holes)
+
+            # Final close to smooth and ensure small remaining gaps are closed
+            filled = cv2.morphologyEx(filled, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+            return filled
+        except Exception:
+            # Fallback to original binary if something goes wrong
+            return binary
     
     def _create_spore_mask(self, contour, image_shape):
         """Create binary mask from contour"""
@@ -901,7 +991,7 @@ class SporeAnalyzer:
                     # Normal case - not requiring separation
                     spore_results.append(spore_data)
         
-        return spore_results if spore_results else None
+        return spore_results, gray, binary if spore_results else None
     
     def get_measurement_lines(self, spore_data):
         """Generate line coordinates for measurement visualization"""

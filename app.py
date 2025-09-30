@@ -683,6 +683,32 @@ def render_step_3_analysis():
             "Threshold Method", ["Otsu", "Adaptive", "Manual"],
             help="Method for converting to binary image")
 
+        # Outline filling controls for adaptive threshold post-processing
+        st.markdown("**Outline filling**")
+        outline_close_kernel = st.slider(
+            "Outline Close Kernel (odd)",
+            min_value=3,
+            max_value=31,
+            value=st.session_state.spore_analyzer.outline_close_kernel if hasattr(st.session_state.spore_analyzer, 'outline_close_kernel') else 9,
+            step=2,
+            help="Morphological closing kernel size used to close gaps in outlines. Larger values close bigger gaps.")
+
+        outline_close_iterations = st.slider(
+            "Outline Close Iterations",
+            min_value=1,
+            max_value=6,
+            value=st.session_state.spore_analyzer.outline_close_iterations if hasattr(st.session_state.spore_analyzer, 'outline_close_iterations') else 2,
+            step=1,
+            help="Number of times to apply morphological closing. Increase to close larger/open gaps.")
+
+        outline_dilate_iters = st.slider(
+            "Outline Dilate Iterations",
+            min_value=0,
+            max_value=4,
+            value=st.session_state.spore_analyzer.outline_dilate_iters if hasattr(st.session_state.spore_analyzer, 'outline_dilate_iters') else 2,
+            step=1,
+            help="Small dilation iterations after closing to guarantee outlines are connected before filling.")
+
         if threshold_method == "Manual":
             threshold_value = st.slider("Threshold Value",
                                         min_value=0,
@@ -752,11 +778,14 @@ def render_step_3_analysis():
                             separate_touching=separate_touching,
                             separation_min_distance=separation_min_distance,
                             separation_sigma=separation_sigma,
-                            separation_erosion_iterations=separation_erosion_iterations
+                            separation_erosion_iterations=separation_erosion_iterations,
+                            outline_close_kernel=outline_close_kernel,
+                            outline_close_iterations=outline_close_iterations,
+                            outline_dilate_iters=outline_dilate_iters
                         )
                         
                         # Run analysis
-                        results = analyzer.analyze_image(st.session_state.original_image)
+                        results, gray, binary = analyzer.analyze_image(st.session_state.original_image)
                         
                         if results and len(results) > 0:
                             # Store results in session state
@@ -797,6 +826,8 @@ def render_step_3_analysis():
                                 True  # include_stats
                             )
                             st.session_state.overlay_image = overlay_image
+                            st.session_state.gray = gray
+                            st.session_state.binary = binary
                             
                             st.success(f"✅ Analysis completed! Found {len(results)} spores.")
                             st.rerun()
@@ -820,6 +851,8 @@ def render_step_3_analysis():
         # Get results from session state
         results = st.session_state.get('analysis_results', [])
         overlay_image = st.session_state.get('overlay_image', None)
+        gray = st.session_state.get('gray', None)
+        binary = st.session_state.get('binary', None)
 
         if results and len(results) > 0:
             # Display overlay image
@@ -829,6 +862,13 @@ def render_step_3_analysis():
             with col2:
                 st.info(f"**Pixel Scale:** {pixel_scale:.2f} pixels/μm")
             if overlay_image is not None:
+                image = st.session_state.original_image
+                col1, col2 = st.columns([1,1])
+                with col1:
+                    st.image(gray, caption="Grayscale Image", use_container_width=True)
+                with col2:
+                    st.image(binary, caption="Binary Image", use_container_width=True)
+
                 col1, col2 = st.columns([3, 1])
                 with col1:
                     selected_count = len(st.session_state.get('selected_spores', []))
