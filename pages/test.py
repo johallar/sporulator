@@ -3,6 +3,8 @@ import cv2
 import numpy as np
 from PIL import Image
 import io
+from scipy import ndimage
+from skimage.segmentation import watershed
 
 st.set_page_config(page_title="Image Processing Test", page_icon="🔬", layout="wide")
 
@@ -127,6 +129,43 @@ if uploaded_file is not None:
             max_value=5,
             value=1,
             help="Number of dilation operations")
+    
+    st.markdown("### 💧 Watershed Separation Settings")
+    
+    col6, col7, col8 = st.columns(3)
+    
+    with col6:
+        enable_watershed = st.checkbox(
+            "Enable Watershed Separation",
+            value=False,
+            help="Apply watershed to separate touching spores")
+    
+    with col7:
+        if enable_watershed:
+            erosion_iterations = st.slider(
+                "Erosion Iterations",
+                min_value=0,
+                max_value=5,
+                value=1,
+                help="Erosion before distance transform")
+    
+    with col8:
+        if enable_watershed:
+            watershed_sigma = st.slider(
+                "Smoothing Sigma",
+                min_value=0.0,
+                max_value=5.0,
+                value=1.0,
+                step=0.5,
+                help="Gaussian smoothing for distance transform")
+            
+            min_distance = st.slider(
+                "Min Distance Between Seeds",
+                min_value=3,
+                max_value=21,
+                value=7,
+                step=2,
+                help="Minimum distance between watershed seeds")
     
     st.markdown("---")
     st.markdown("## 🔍 Processing Pipeline Visualization")
@@ -286,6 +325,109 @@ if uploaded_file is not None:
                 st.metric("Avg Contour Area", f"{avg_area:.1f} px²")
             else:
                 st.metric("Avg Contour Area", "N/A")
+        
+        if enable_watershed and len(contours_final) > 0:
+            st.markdown("---")
+            st.markdown("### 💧 Watershed Separation Debug")
+            
+            st.info("🔬 **Demonstrating watershed on the first detected contour**")
+            
+            watershed_steps = {}
+            
+            test_contour = contours_final[0]
+            
+            ws_status = st.empty()
+            ws_progress = st.progress(0)
+            
+            ws_status.text("Watershed Step 1/6: Creating mask from contour...")
+            ws_progress.progress(1/6)
+            mask = np.zeros(filled.shape, dtype=np.uint8)
+            cv2.drawContours(mask, [test_contour], -1, 255, thickness=cv2.FILLED)
+            watershed_steps['1_mask'] = mask.copy()
+            
+            ws_status.text("Watershed Step 2/6: Applying erosion...")
+            ws_progress.progress(2/6)
+            if erosion_iterations > 0:
+                kernel = np.ones((3, 3), np.uint8)
+                eroded = cv2.erode(mask, kernel, iterations=erosion_iterations)
+            else:
+                eroded = mask.copy()
+            watershed_steps['2_eroded'] = eroded.copy()
+            
+            ws_status.text("Watershed Step 3/6: Computing distance transform...")
+            ws_progress.progress(3/6)
+            distance = cv2.distanceTransform(eroded, cv2.DIST_L2, 5)
+            distance_normalized = cv2.normalize(distance, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+            watershed_steps['3_distance'] = distance_normalized
+            
+            ws_status.text("Watershed Step 4/6: Smoothing distance transform...")
+            ws_progress.progress(4/6)
+            if watershed_sigma > 0:
+                distance_smooth = ndimage.gaussian_filter(distance, sigma=watershed_sigma)
+            else:
+                distance_smooth = distance.copy()
+            distance_smooth_normalized = cv2.normalize(distance_smooth, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+            watershed_steps['4_smoothed'] = distance_smooth_normalized
+            
+            ws_status.text("Watershed Step 5/6: Finding local maxima (seeds)...")
+            ws_progress.progress(5/6)
+            footprint = np.ones((min_distance, min_distance))
+            local_maxima = (distance_smooth == ndimage.maximum_filter(distance_smooth, footprint=footprint))
+            threshold = 0.3 * distance_smooth.max()
+            local_maxima = local_maxima & (distance_smooth >= threshold)
+            coordinates = np.argwhere(local_maxima)
+            
+            markers = np.zeros(distance_smooth.shape, dtype=np.int32)
+            for i, (y, x) in enumerate(coordinates):
+                markers[y, x] = i + 1
+            
+            markers_visual = cv2.normalize(markers, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+            markers_colored = cv2.applyColorMap(markers_visual, cv2.COLORMAP_JET)
+            watershed_steps['5_markers'] = markers_colored
+            
+            ws_status.text("Watershed Step 6/6: Applying watershed segmentation...")
+            ws_progress.progress(6/6)
+            if len(coordinates) > 0:
+                labels = watershed(-distance_smooth, markers, mask=eroded)
+                labels_normalized = cv2.normalize(labels, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+                labels_colored = cv2.applyColorMap(labels_normalized, cv2.COLORMAP_JET)
+                watershed_steps['6_labels'] = labels_colored
+            else:
+                watershed_steps['6_labels'] = np.zeros_like(mask)
+            
+            ws_status.text("✅ Watershed processing complete!")
+            ws_progress.progress(1.0)
+            
+            st.markdown("#### 🔬 Watershed Processing Steps")
+            
+            ws_col1, ws_col2, ws_col3 = st.columns(3)
+            
+            with ws_col1:
+                st.markdown("**Step 1: Contour Mask**")
+                st.image(watershed_steps['1_mask'], use_container_width=True, clamp=True)
+                st.caption("Binary mask from contour")
+                
+                st.markdown("**Step 4: Smoothed Distance**")
+                st.image(watershed_steps['4_smoothed'], use_container_width=True, clamp=True)
+                st.caption(f"Sigma: {watershed_sigma}")
+            
+            with ws_col2:
+                st.markdown("**Step 2: Eroded Mask**")
+                st.image(watershed_steps['2_eroded'], use_container_width=True, clamp=True)
+                st.caption(f"Iterations: {erosion_iterations}")
+                
+                st.markdown("**Step 5: Watershed Seeds**")
+                st.image(watershed_steps['5_markers'], use_container_width=True)
+                st.caption(f"Found {len(coordinates)} seeds (min dist: {min_distance})")
+            
+            with ws_col3:
+                st.markdown("**Step 3: Distance Transform**")
+                st.image(watershed_steps['3_distance'], use_container_width=True, clamp=True)
+                st.caption("Distance to background")
+                
+                st.markdown("**Step 6: Watershed Labels**")
+                st.image(watershed_steps['6_labels'], use_container_width=True)
+                st.caption("Separated regions")
         
         st.success("✅ **Pipeline visualization complete!** Use the settings above to adjust parameters and re-run.")
 
