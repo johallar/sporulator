@@ -79,6 +79,14 @@ if uploaded_file is not None:
     col3, col4, col5 = st.columns(3)
     
     with col3:
+        contrast_alpha = st.slider(
+            "Contrast Enhancement",
+            min_value=0.5,
+            max_value=3.0,
+            value=1.5,
+            step=0.1,
+            help="Contrast multiplier (1.0 = no change, >1.0 = more contrast)")
+        
         blur_kernel = st.slider(
             "Blur Kernel Size",
             min_value=1,
@@ -129,28 +137,33 @@ if uploaded_file is not None:
         
         steps = {}
         
-        status_text.text("Step 1/9: Loading original image...")
-        progress_bar.progress(1/9)
+        status_text.text("Step 1/10: Loading original image...")
+        progress_bar.progress(1/10)
         steps['1_original'] = image_array.copy()
         
-        status_text.text("Step 2/9: Converting to grayscale...")
-        progress_bar.progress(2/9)
-        if len(image_array.shape) == 3:
-            gray = cv2.cvtColor(image_array, cv2.COLOR_BGR2GRAY)
-        else:
-            gray = image_array.copy()
-        steps['2_grayscale'] = gray
+        status_text.text("Step 2/10: Applying contrast enhancement...")
+        progress_bar.progress(2/10)
+        contrasted = cv2.convertScaleAbs(image_array, alpha=contrast_alpha, beta=0)
+        steps['2_contrasted'] = contrasted.copy()
         
-        status_text.text("Step 3/9: Applying Gaussian blur...")
-        progress_bar.progress(3/9)
+        status_text.text("Step 3/10: Converting to grayscale...")
+        progress_bar.progress(3/10)
+        if len(contrasted.shape) == 3:
+            gray = cv2.cvtColor(contrasted, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = contrasted.copy()
+        steps['3_grayscale'] = gray
+        
+        status_text.text("Step 4/10: Applying Gaussian blur...")
+        progress_bar.progress(4/10)
         if blur_kernel > 1:
             blurred = cv2.GaussianBlur(gray, (blur_kernel, blur_kernel), 0)
         else:
             blurred = gray.copy()
-        steps['3_blurred'] = blurred
+        steps['4_blurred'] = blurred
         
-        status_text.text("Step 4/9: Applying threshold...")
-        progress_bar.progress(4/9)
+        status_text.text("Step 5/10: Applying threshold...")
+        progress_bar.progress(5/10)
         if threshold_method == "Otsu":
             _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         elif threshold_method == "Adaptive":
@@ -159,46 +172,46 @@ if uploaded_file is not None:
         else:
             thresh_val = threshold_value if threshold_value is not None else 127
             _, binary = cv2.threshold(blurred, thresh_val, 255, cv2.THRESH_BINARY)
-        steps['4_threshold'] = binary.copy()
+        steps['5_threshold'] = binary.copy()
         
-        status_text.text("Step 5/9: Inverting binary (if needed)...")
-        progress_bar.progress(5/9)
+        status_text.text("Step 6/10: Inverting binary (if needed)...")
+        progress_bar.progress(6/10)
         if np.sum(binary == 255) > np.sum(binary == 0):
             binary = cv2.bitwise_not(binary)
-        steps['5_inverted'] = binary.copy()
+        steps['6_inverted'] = binary.copy()
         
-        status_text.text("Step 6/9: Applying morphological closing...")
-        progress_bar.progress(6/9)
+        status_text.text("Step 7/10: Applying morphological closing...")
+        progress_bar.progress(7/10)
         k = close_kernel if close_kernel % 2 == 1 else close_kernel + 1
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
         closed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=close_iterations)
-        steps['6_closed'] = closed.copy()
+        steps['7_closed'] = closed.copy()
         
-        status_text.text("Step 7/9: Dilating outlines...")
-        progress_bar.progress(7/9)
+        status_text.text("Step 8/10: Dilating outlines...")
+        progress_bar.progress(8/10)
         if dilate_iters > 0:
             dkernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
             dilated = cv2.dilate(closed, dkernel, iterations=dilate_iters)
         else:
             dilated = closed.copy()
-        steps['7_dilated'] = dilated.copy()
+        steps['8_dilated'] = dilated.copy()
         
-        status_text.text("Step 8/9: Finding and filling contours...")
-        progress_bar.progress(8/9)
+        status_text.text("Step 9/10: Finding and filling contours...")
+        progress_bar.progress(9/10)
         contours, _ = cv2.findContours(dilated.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         filled = np.zeros_like(dilated)
         min_area_pixels = 20
         for cnt in contours:
             if cv2.contourArea(cnt) >= min_area_pixels:
-                cv2.drawContours(filled, [cnt], -1, 255, thickness=cv2.FILLED)
-        steps['8_filled'] = filled.copy()
+                cv2.drawContours(filled, [cnt], -1, (255,), thickness=cv2.FILLED)
+        steps['9_filled'] = filled.copy()
         
-        status_text.text("Step 9/9: Drawing final contours...")
-        progress_bar.progress(9/9)
+        status_text.text("Step 10/10: Drawing final contours...")
+        progress_bar.progress(10/10)
         final_image = cv2.cvtColor(image_array.copy(), cv2.COLOR_BGR2RGB)
         contours_final, _ = cv2.findContours(filled, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cv2.drawContours(final_image, contours_final, -1, (0, 255, 0), 2)
-        steps['9_final'] = final_image
+        steps['10_final'] = final_image
         
         status_text.text("✅ Processing complete!")
         progress_bar.progress(1.0)
@@ -213,39 +226,43 @@ if uploaded_file is not None:
             st.image(steps['1_original'], use_container_width=True)
             st.caption(f"Shape: {steps['1_original'].shape}")
             
-            st.markdown("#### 4️⃣ Threshold")
-            st.image(steps['4_threshold'], use_container_width=True, clamp=True)
-            st.caption(f"Method: {threshold_method}")
-            
-            st.markdown("#### 7️⃣ Dilated")
-            st.image(steps['7_dilated'], use_container_width=True, clamp=True)
-            st.caption(f"Iterations: {dilate_iters}")
-        
-        with col_b:
-            st.markdown("#### 2️⃣ Grayscale")
-            st.image(steps['2_grayscale'], use_container_width=True, clamp=True)
-            st.caption(f"Shape: {steps['2_grayscale'].shape}")
-            
-            st.markdown("#### 5️⃣ Inverted Binary")
-            st.image(steps['5_inverted'], use_container_width=True, clamp=True)
-            st.caption("White spores on black background")
-            
-            st.markdown("#### 8️⃣ Filled Contours")
-            st.image(steps['8_filled'], use_container_width=True, clamp=True)
-            st.caption(f"Min area: {min_area_pixels} pixels")
-        
-        with col_c:
-            st.markdown("#### 3️⃣ Blurred")
-            st.image(steps['3_blurred'], use_container_width=True, clamp=True)
+            st.markdown("#### 4️⃣ Blurred")
+            st.image(steps['4_blurred'], use_container_width=True, clamp=True)
             st.caption(f"Kernel: {blur_kernel}×{blur_kernel}")
             
-            st.markdown("#### 6️⃣ Morphological Closing")
-            st.image(steps['6_closed'], use_container_width=True, clamp=True)
+            st.markdown("#### 7️⃣ Morphological Closing")
+            st.image(steps['7_closed'], use_container_width=True, clamp=True)
             st.caption(f"Kernel: {k}×{k}, Iterations: {close_iterations}")
             
-            st.markdown("#### 9️⃣ Final Result")
-            st.image(steps['9_final'], use_container_width=True)
+            st.markdown("#### 🔟 Final Result")
+            st.image(steps['10_final'], use_container_width=True)
             st.caption(f"Detected contours: {len(contours_final)}")
+        
+        with col_b:
+            st.markdown("#### 2️⃣ Contrast Enhanced")
+            st.image(steps['2_contrasted'], use_container_width=True)
+            st.caption(f"Alpha: {contrast_alpha}")
+            
+            st.markdown("#### 5️⃣ Threshold")
+            st.image(steps['5_threshold'], use_container_width=True, clamp=True)
+            st.caption(f"Method: {threshold_method}")
+            
+            st.markdown("#### 8️⃣ Dilated")
+            st.image(steps['8_dilated'], use_container_width=True, clamp=True)
+            st.caption(f"Iterations: {dilate_iters}")
+        
+        with col_c:
+            st.markdown("#### 3️⃣ Grayscale")
+            st.image(steps['3_grayscale'], use_container_width=True, clamp=True)
+            st.caption(f"Shape: {steps['3_grayscale'].shape}")
+            
+            st.markdown("#### 6️⃣ Inverted Binary")
+            st.image(steps['6_inverted'], use_container_width=True, clamp=True)
+            st.caption("White spores on black background")
+            
+            st.markdown("#### 9️⃣ Filled Contours")
+            st.image(steps['9_filled'], use_container_width=True, clamp=True)
+            st.caption(f"Min area: {min_area_pixels} pixels")
         
         st.markdown("---")
         st.markdown("### 📊 Detection Statistics")
