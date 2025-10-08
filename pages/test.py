@@ -261,8 +261,8 @@ if uploaded_file is not None:
                 filtered_count += 1
         steps['9_filled'] = filled.copy()
         
-        status_text.text("Step 10/10: Drawing final contours (area filtered)...")
-        progress_bar.progress(10/10)
+        status_text.text("Step 10/11: Drawing final contours (area filtered)...")
+        progress_bar.progress(10/11)
         final_image = cv2.cvtColor(image_array.copy(), cv2.COLOR_BGR2RGB)
         contours_final, _ = cv2.findContours(filled, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         # Apply area filter again for final contours
@@ -274,6 +274,75 @@ if uploaded_file is not None:
         contours_final = contours_filtered
         cv2.drawContours(final_image, contours_final, -1, (0, 255, 0), 2)
         steps['10_final'] = final_image
+        
+        status_text.text("Step 11/11: Adding measurement lines (length & width)...")
+        progress_bar.progress(11/11)
+        measured_image = cv2.cvtColor(image_array.copy(), cv2.COLOR_BGR2RGB)
+        
+        # Calculate and draw measurements for each contour
+        measurements = []
+        for cnt in contours_final:
+            # Fit ellipse to get dimensions
+            if len(cnt) >= 5:
+                try:
+                    ellipse = cv2.fitEllipse(cnt)
+                    center, axes, angle = ellipse
+                    cx, cy = int(center[0]), int(center[1])
+                    
+                    # Get major and minor axes
+                    width_px, height_px = axes
+                    if width_px >= height_px:
+                        major_axis = width_px
+                        minor_axis = height_px
+                        major_angle = angle
+                    else:
+                        major_axis = height_px
+                        minor_axis = width_px
+                        major_angle = angle + 90
+                    
+                    # Convert to micrometers
+                    length_um = major_axis / pixel_scale
+                    width_um = minor_axis / pixel_scale
+                    
+                    # Calculate line endpoints
+                    angle_rad = np.radians(major_angle)
+                    half_length = major_axis / 2
+                    length_x1 = int(cx - half_length * np.cos(angle_rad))
+                    length_y1 = int(cy - half_length * np.sin(angle_rad))
+                    length_x2 = int(cx + half_length * np.cos(angle_rad))
+                    length_y2 = int(cy + half_length * np.sin(angle_rad))
+                    
+                    width_angle_rad = angle_rad + np.pi/2
+                    half_width = minor_axis / 2
+                    width_x1 = int(cx - half_width * np.cos(width_angle_rad))
+                    width_y1 = int(cy - half_width * np.sin(width_angle_rad))
+                    width_x2 = int(cx + half_width * np.cos(width_angle_rad))
+                    width_y2 = int(cy + half_width * np.sin(width_angle_rad))
+                    
+                    # Draw contour
+                    cv2.drawContours(measured_image, [cnt], -1, (0, 255, 0), 2)
+                    
+                    # Draw measurement lines (cyan for length, yellow for width)
+                    cv2.line(measured_image, (length_x1, length_y1), (length_x2, length_y2), (255, 255, 0), 2)
+                    cv2.line(measured_image, (width_x1, width_y1), (width_x2, width_y2), (255, 0, 255), 2)
+                    
+                    # Draw centroid
+                    cv2.circle(measured_image, (cx, cy), 4, (255, 0, 0), -1)
+                    
+                    # Add text with measurements
+                    text = f"L:{length_um:.1f} W:{width_um:.1f}"
+                    cv2.putText(measured_image, text, (cx + 10, cy - 10),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+                    
+                    measurements.append({
+                        'length_um': length_um,
+                        'width_um': width_um,
+                        'area_um2': (major_axis * minor_axis * np.pi / 4) / (pixel_scale ** 2)
+                    })
+                except:
+                    pass
+        
+        steps['11_measured'] = measured_image
         
         status_text.text("✅ Processing complete!")
         progress_bar.progress(1.0)
@@ -296,9 +365,13 @@ if uploaded_file is not None:
             st.image(steps['7_closed'], use_container_width=True, clamp=True)
             st.caption(f"Kernel: {k}×{k}, Iterations: {close_iterations}")
             
-            st.markdown("#### 🔟 Final Result")
+            st.markdown("#### 🔟 Final Contours")
             st.image(steps['10_final'], use_container_width=True)
             st.caption(f"Detected contours: {len(contours_final)}")
+            
+            st.markdown("#### 1️⃣1️⃣ Measured Spores")
+            st.image(steps['11_measured'], use_container_width=True)
+            st.caption(f"With length (cyan) & width (magenta) lines")
         
         with col_b:
             st.markdown("#### 2️⃣ Contrast Enhanced")
@@ -348,6 +421,33 @@ if uploaded_file is not None:
                 st.metric("Avg Contour Area", f"{avg_area:.1f} px²")
             else:
                 st.metric("Avg Contour Area", "N/A")
+        
+        if measurements:
+            st.markdown("---")
+            st.markdown("### 📏 Spore Measurements")
+            
+            meas_col1, meas_col2, meas_col3, meas_col4 = st.columns(4)
+            
+            lengths = [m['length_um'] for m in measurements]
+            widths = [m['width_um'] for m in measurements]
+            areas = [m['area_um2'] for m in measurements]
+            
+            with meas_col1:
+                st.metric("Avg Length", f"{np.mean(lengths):.2f} μm")
+                st.caption(f"Range: {np.min(lengths):.1f} - {np.max(lengths):.1f}")
+            
+            with meas_col2:
+                st.metric("Avg Width", f"{np.mean(widths):.2f} μm")
+                st.caption(f"Range: {np.min(widths):.1f} - {np.max(widths):.1f}")
+            
+            with meas_col3:
+                st.metric("Avg Area", f"{np.mean(areas):.1f} μm²")
+                st.caption(f"Range: {np.min(areas):.1f} - {np.max(areas):.1f}")
+            
+            with meas_col4:
+                aspect_ratios = [l/w for l, w in zip(lengths, widths)]
+                st.metric("Avg Aspect Ratio", f"{np.mean(aspect_ratios):.2f}")
+                st.caption(f"Range: {np.min(aspect_ratios):.1f} - {np.max(aspect_ratios):.1f}")
         
         if enable_watershed and len(contours_final) > 0:
             st.markdown("---")
