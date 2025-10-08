@@ -28,6 +28,15 @@ if uploaded_file is not None:
     
     with col1:
         st.markdown("### 🎯 Basic Detection Parameters")
+        
+        pixel_scale = st.number_input(
+            "Pixel Scale (pixels/μm)",
+            min_value=0.1,
+            max_value=100.0,
+            value=10.0,
+            step=0.1,
+            help="Number of pixels per micrometer for area conversion")
+        
         area_range = st.slider(
             "Spore Area Range (μm²)",
             min_value=1,
@@ -35,6 +44,11 @@ if uploaded_file is not None:
             value=(10, 500),
             help="Area range for objects to be considered spores")
         min_area, max_area = area_range
+        
+        # Convert area from μm² to pixels²
+        min_area_pixels = int(min_area * (pixel_scale ** 2))
+        max_area_pixels = int(max_area * (pixel_scale ** 2))
+        st.caption(f"📐 Area in pixels: {min_area_pixels} - {max_area_pixels} px²")
 
         circularity_range = st.slider(
             "Circularity Range",
@@ -235,20 +249,29 @@ if uploaded_file is not None:
             dilated = closed.copy()
         steps['8_dilated'] = dilated.copy()
         
-        status_text.text("Step 9/10: Finding and filling contours...")
+        status_text.text("Step 9/10: Finding and filling contours (with area filtering)...")
         progress_bar.progress(9/10)
         contours, _ = cv2.findContours(dilated.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         filled = np.zeros_like(dilated)
-        min_area_pixels = 20
+        filtered_count = 0
         for cnt in contours:
-            if cv2.contourArea(cnt) >= min_area_pixels:
+            area = cv2.contourArea(cnt)
+            if min_area_pixels <= area <= max_area_pixels:
                 cv2.drawContours(filled, [cnt], -1, (255,), thickness=cv2.FILLED)
+                filtered_count += 1
         steps['9_filled'] = filled.copy()
         
-        status_text.text("Step 10/10: Drawing final contours...")
+        status_text.text("Step 10/10: Drawing final contours (area filtered)...")
         progress_bar.progress(10/10)
         final_image = cv2.cvtColor(image_array.copy(), cv2.COLOR_BGR2RGB)
         contours_final, _ = cv2.findContours(filled, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # Apply area filter again for final contours
+        contours_filtered = []
+        for cnt in contours_final:
+            area = cv2.contourArea(cnt)
+            if min_area_pixels <= area <= max_area_pixels:
+                contours_filtered.append(cnt)
+        contours_final = contours_filtered
         cv2.drawContours(final_image, contours_final, -1, (0, 255, 0), 2)
         steps['10_final'] = final_image
         
@@ -301,7 +324,7 @@ if uploaded_file is not None:
             
             st.markdown("#### 9️⃣ Filled Contours")
             st.image(steps['9_filled'], use_container_width=True, clamp=True)
-            st.caption(f"Min area: {min_area_pixels} pixels")
+            st.caption(f"Area range: {min_area_pixels}-{max_area_pixels} px² ({min_area}-{max_area} μm²)")
         
         st.markdown("---")
         st.markdown("### 📊 Detection Statistics")
